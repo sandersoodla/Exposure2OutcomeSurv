@@ -9,9 +9,12 @@
 
 library(shiny)
 library(bslib)
+library(DT)
+library(ggplot2)
 
 # Define UI for application 
 ui <- fluidPage(
+    theme = bs_theme(bootswatch = "cerulean"),
 
     # Application title
     titlePanel("Start condition to target condition overview"),
@@ -19,21 +22,32 @@ ui <- fluidPage(
     
     sidebarLayout(
         sidebarPanel(
-            numericInput("startConditionId", "Start Condition concept id", value = "40481087"),
+            numericInput("startConditionId", "Start Condition concept id", value = "40481087", min = 0),
             textOutput("startConditionText"),
-            numericInput("targetConditionId", "Target Condition concept id", value = "372328"),
+            hr(),
+            numericInput("targetConditionId", "Target Condition concept id", value = "372328", min = 0),
             textOutput("targetConditionText"),
+            actionButton("getData", "Get stats"),
+            hr(),
+            selectizeInput(
+              "selectedPatient",
+              "Select a Patient ID:",
+              choices = NULL  # Initialize with no choices
+            )
         ),
 
         mainPanel(
-            #tableOutput("summary"),
             textOutput("percentageOfTargetText"),
             textOutput("percentageOfTarget1"),
             textOutput("percentageOfTarget3"),
             textOutput("percentageOfTarget5"),
             textOutput("demographicOverviewText"),
-            textOutput("trajectoryDisplayText"),
-            tableOutput("startToTargetCondition")
+            
+            tabsetPanel(
+              tabPanel("Trajectories containing start condition", DTOutput("trajectoryTable")),
+              tabPanel("Patient Timeline", plotOutput("patientTimeline")),
+              tabPanel("Start to target", DTOutput("startToTargetConditionTable"))
+            ),
         )
     )
 )
@@ -51,18 +65,27 @@ server <- function(input, output, session) {
     output$targetConditionText <- renderText(paste(input$targetConditionId, getConditionInfo(connection, input$targetConditionId)))
     
     
-    startToTargetConditionDF <- reactive({
-      req(input$startConditionId)
-      req(input$targetConditionId)
+    # Reactive expression to fetch data when the button is clicked
+    trajectoriesData <- eventReactive(input$getData, {
+      req(input$startConditionId > 0)
+      req(input$targetConditionId > 0)
       
-      createStartToTargetConditionDF4(connection, input$startConditionId, input$targetConditionId)
+      df <- getTrajectoriesForCondition(connection, input$startConditionId)
+      return(df)
+    })
+    
+    startToTargetConditionDF <- eventReactive(input$getData, {
+      req(input$startConditionId > 0)
+      req(input$targetConditionId > 0)
+      
+      df <- createStartToTargetConditionDF4(connection, input$startConditionId, input$targetConditionId)
+      return(df)
     })
     
     resultPercentages <- reactive({
       calculateStartToTargetPercentages(startToTargetConditionDF())
     })
 
-    #output$summary <- renderTable(resultSummary())
     output$percentageOfTargetText <- renderText("Chance of target condition from start condition")
     output$percentageOfTarget1 <- renderText(paste("in 1 year:", resultPercentages()$target_percentage_1y, "%"))
     output$percentageOfTarget3 <- renderText(paste("in 3 years:", resultPercentages()$target_percentage_3y, "%"))
@@ -70,9 +93,53 @@ server <- function(input, output, session) {
     
     output$demographicOverviewText <- renderText("Demographic overview")
     
-    output$trajectoryDisplayText <- renderText("Trajectories for start condition")
     
-    output$startToTargetCondition <- renderTable(head(startToTargetConditionDF(), 100))
+    # Render the trajectories table
+    output$trajectoryTable <- renderDT({
+      req(trajectoriesData())
+      datatable(
+        trajectoriesData(),
+        options = list(pageLength = 10),
+        filter = 'top'
+      )
+    })
+    
+    # Render the start to target condition table
+    output$startToTargetConditionTable <- renderDT({
+      req(startToTargetConditionDF())
+      datatable(
+        startToTargetConditionDF(),
+        options = list(pageLength = 10),
+        filter = 'top'
+      )
+    })
+    
+    # Update the patient selector when trajectories Data changes
+    observeEvent(trajectoriesData(), {
+      updateSelectizeInput(
+        session,
+        "selectedPatient",
+        choices = unique(trajectoriesData()$PERSON_ID),
+        server = TRUE
+      )
+    })
+    
+    # Render the patient timeline plot
+    output$patientTimeline <- renderPlot({
+      req(trajectoriesData())
+      req(input$selectedPatient)
+      patientData <- trajectoriesData() %>%
+        filter(PERSON_ID == input$selectedPatient)
+      
+      ggplot(patientData, aes(x = CONDITION_START_DATE, y = CONCEPT_NAME)) +
+        geom_point() +
+        labs(
+          title = paste("Condition timeline for Patient", input$selectedPatient),
+          x = "Date",
+          y = "Condition"
+        ) +
+        theme_minimal()
+    })
     
     
     session$onSessionEnded(function() {

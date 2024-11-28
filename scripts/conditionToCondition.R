@@ -193,7 +193,7 @@ createStartToTargetConditionDF4 <- function(connection, start_condition_concept_
   # Join start and target conditions on PERSON_ID
   # For each start condition, find the earliest target condition after it
   start_target_combinations <- start_conditions %>%
-    inner_join(target_conditions, by = "PERSON_ID", suffix = c("_start", "_target")) %>%
+    inner_join(target_conditions, by = "PERSON_ID", suffix = c("_start", "_target"), relationship = "many-to-many") %>%
     filter(CONDITION_START_DATE_target >= CONDITION_START_DATE_start) %>%
     mutate(time_diff_days = as.numeric(difftime(CONDITION_START_DATE_target, CONDITION_START_DATE_start, units = "days")))
   
@@ -246,6 +246,6 @@ calculateStartToTargetPercentages <- function(start_to_target_condition) {
 
 
 
-connection <- DatabaseConnector::connect(dbms = "sqlite", server = "c:/temp/EunomiaData/GiBleed_5.3.sqlite")
-trajectories_for_condition <- getTrajectoriesForCondition(connection, 40481087)
-DatabaseConnector::disconnect(connection)
+#connection <- DatabaseConnector::connect(dbms = "sqlite", server = "c:/temp/EunomiaData/GiBleed_5.3.sqlite")
+#trajectories_for_condition <- getTrajectoriesForCondition(connection, 40481087)
+#DatabaseConnector::disconnect(connection)
