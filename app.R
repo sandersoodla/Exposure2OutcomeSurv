@@ -33,7 +33,8 @@ ui <- fluidPage(
               "selectedPatient",
               "Select a Patient ID:",
               choices = NULL  # Initialize with no choices
-            )
+            ),
+            width = 3
         ),
 
         mainPanel(
@@ -41,19 +42,32 @@ ui <- fluidPage(
             textOutput("percentageOfTarget1"),
             textOutput("percentageOfTarget3"),
             textOutput("percentageOfTarget5"),
-            textOutput("demographicOverviewText"),
             
             tabsetPanel(
-              tabPanel("Trajectories containing start condition", DTOutput("trajectoryTable")),
-              tabPanel("Patient Timeline", plotOutput("patientTimeline")),
-              tabPanel("Start to target", DTOutput("startToTargetConditionTable"))
+                tabPanel("Demographic overview", 
+                    fluidRow(
+                      column(6, plotOutput("patientPyramid1")),
+                      column(6, plotOutput("patientPyramid2"))
+                    ),
+                ),
+                tabPanel("Trajectories containing start condition", DTOutput("trajectoryTable")),
+                tabPanel("Patient Timeline", plotOutput("patientTimeline")),
+                tabPanel("Start to target", DTOutput("startToTargetConditionTable"))
             ),
+            width = 9
         )
     )
 )
 
+
+
+
+
 source("scripts/getConditionInfo.R")
 source("scripts/conditionToCondition.R")
+source("scripts/demographicAnalysis.R")
+
+
 
 # Define server logic 
 server <- function(input, output, session) {
@@ -74,11 +88,10 @@ server <- function(input, output, session) {
       return(df)
     })
     
-    startToTargetConditionDF <- eventReactive(input$getData, {
-      req(input$startConditionId > 0)
-      req(input$targetConditionId > 0)
+    startToTargetConditionDF <- eventReactive(trajectoriesData(), {
+      req(trajectoriesData())
       
-      df <- createStartToTargetConditionDF4(connection, input$startConditionId, input$targetConditionId)
+      df <- createStartToTargetConditionDF4(trajectoriesData(), input$startConditionId, input$targetConditionId)
       return(df)
     })
     
@@ -91,7 +104,6 @@ server <- function(input, output, session) {
     output$percentageOfTarget3 <- renderText(paste("in 3 years:", resultPercentages()$target_percentage_3y, "%"))
     output$percentageOfTarget5 <- renderText(paste("in 5 years:", resultPercentages()$target_percentage_5y, "%"))
     
-    output$demographicOverviewText <- renderText("Demographic overview")
     
     
     # Render the trajectories table
@@ -140,6 +152,24 @@ server <- function(input, output, session) {
         ) +
         theme_minimal()
     })
+    
+    # Render the patient pyramid plots
+    output$patientPyramid1 <- renderPlot({
+      req(trajectoriesData())
+      req(input$startConditionId > 0)
+
+      createPopulationPyramidForCondition(connection, input$startConditionId)
+      
+    })
+    
+    output$patientPyramid2 <- renderPlot({
+      req(trajectoriesData())
+      req(input$targetConditionId > 0)
+      
+      createPopulationPyramidForCondition(connection, input$targetConditionId)
+      
+    })
+    
     
     
     session$onSessionEnded(function() {

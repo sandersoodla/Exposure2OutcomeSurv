@@ -5,9 +5,9 @@ library(dplyr)
 library(data.table)
 
 
-getTrajectoriesForCondition <- function(connection, start_condition_concept_id) {
+getTrajectoriesForCondition <- function(connection, conditionConceptID) {
   
-  sql_trajectories_for_condition <- 
+  sqlTrajectoriesForCondition <- 
     SqlRender::render("WITH condition_people AS (
                           SELECT DISTINCT person_id
                           FROM condition_occurrence
@@ -18,11 +18,27 @@ getTrajectoriesForCondition <- function(connection, start_condition_concept_id) 
                       JOIN condition_people cp ON co.person_id = cp.person_id
                       JOIN concept c ON co.condition_concept_id = c.concept_id
                       ORDER BY co.person_id, co.condition_start_date;",
-                      id = start_condition_concept_id)
+                      id = conditionConceptID)
   
-  trajectories_for_condition <- DatabaseConnector::querySql(connection, sql_trajectories_for_condition)
+  trajectoriesForCondition <- DatabaseConnector::querySql(connection, sqlTrajectoriesForCondition)
   
-  return (trajectories_for_condition)
+  return (trajectoriesForCondition)
+}
+
+
+getOccurrencesOfCondition <- function(connection, conditionConceptID) {
+  
+  sqlOccurrencesOfCondition <- 
+    SqlRender::render("SELECT co.person_id, c.concept_id, c.concept_name, co.condition_start_date
+                      FROM condition_occurrence co
+                      JOIN concept c ON co.condition_concept_id = c.concept_id
+                      WHERE co.condition_concept_id = @id
+                      ORDER BY co.person_id, co.condition_start_date;",
+                      id = conditionConceptID)
+  
+  occurrencesOfCondition <- DatabaseConnector::querySql(connection, sqlOccurrencesOfCondition)
+  
+  return (occurrencesOfCondition)
 }
 
 
@@ -167,10 +183,10 @@ createStartToTargetConditionDF2 <- function(connection, start_condition_concept_
 
 
 
-createStartToTargetConditionDF4 <- function(connection, start_condition_concept_id, target_condition_concept_id) {
+createStartToTargetConditionDF4 <- function(trajectories, start_condition_concept_id, target_condition_concept_id) {
   
   # Fetch trajectories and filter for start and target conditions
-  trajectories_for_start_condition <- getTrajectoriesForCondition(connection, start_condition_concept_id)
+  trajectories_for_start_condition <- trajectories
   
   trajectories_only_start_and_target <- trajectories_for_start_condition %>%
     filter(CONCEPT_ID == start_condition_concept_id | CONCEPT_ID == target_condition_concept_id)
