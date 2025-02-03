@@ -1,16 +1,17 @@
 
 
-getConditionInfo<-function(connection, 
-                           conditionConceptId) {
-  
-  if (is.na(conditionConceptId)) return (NULL)
-  
-  sql <- SqlRender::render("SELECT concept_name FROM concept WHERE concept_id == @id",
-                           id = conditionConceptId)
-  
-  # TODO translate dialect
-  
-  result <- DatabaseConnector::querySql(connection, sql)
+getConditionInfo <- function(cdm, conditionConceptId) {
 
-  return (result[[1]])
+  if (is.na(conditionConceptId)) return(NULL)
+
+  result <- cdm$concept %>%
+    filter(concept_id == conditionConceptId) %>%
+    select(concept_name) %>%
+    collect()
+
+  if (nrow(result) > 0) {
+    return(result$concept_name)  # Extract the concept name
+  } else {
+    return(NA)
+  }
 }

@@ -5,183 +5,35 @@ library(dplyr)
 library(data.table)
 
 
-getTrajectoriesForCondition <- function(connection, conditionConceptID) {
+getTrajectoriesForCondition <- function(cdm, conditionConceptID) {
   
-  sqlTrajectoriesForCondition <- 
-    SqlRender::render("WITH condition_people AS (
-                          SELECT DISTINCT person_id
-                          FROM condition_occurrence
-                          WHERE condition_concept_id == @id
-                      )
-                      SELECT co.person_id, c.concept_id, c.concept_name, co.condition_start_date
-                      FROM condition_occurrence co
-                      JOIN condition_people cp ON co.person_id = cp.person_id
-                      JOIN concept c ON co.condition_concept_id = c.concept_id
-                      ORDER BY co.person_id, co.condition_start_date;",
-                      id = conditionConceptID)
+  condition_people <- cdm$condition_occurrence %>%
+    filter(condition_concept_id == conditionConceptID) %>%
+    distinct(person_id) %>%
+    collect()  # Bring the person_ids into R for the next step
   
-  trajectoriesForCondition <- DatabaseConnector::querySql(connection, sqlTrajectoriesForCondition)
+  trajectories <- cdm$condition_occurrence %>%
+    inner_join(condition_people, by = "person_id") %>%  # Filter to only people with the condition
+    inner_join(cdm$concept, by = c("condition_concept_id" = "concept_id")) %>%  # Get concept names
+    select(person_id, concept_id, concept_name, condition_start_date) %>%
+    arrange(person_id, condition_start_date) %>%
+    collect()
   
-  return (trajectoriesForCondition)
+  return(trajectories)
 }
 
 
-getOccurrencesOfCondition <- function(connection, conditionConceptID) {
+getOccurrencesOfCondition <- function(cdm, conditionConceptID) {
   
-  sqlOccurrencesOfCondition <- 
-    SqlRender::render("SELECT co.person_id, c.concept_id, c.concept_name, co.condition_start_date
-                      FROM condition_occurrence co
-                      JOIN concept c ON co.condition_concept_id = c.concept_id
-                      WHERE co.condition_concept_id = @id
-                      ORDER BY co.person_id, co.condition_start_date;",
-                      id = conditionConceptID)
+  occurrences <- cdm$condition_occurrence %>%
+    filter(condition_concept_id == conditionConceptID) %>%
+    inner_join(cdm$concept, by = c("condition_concept_id" = "concept_id")) %>%
+    select(person_id, concept_id, concept_name, condition_start_date) %>%
+    arrange(person_id, condition_start_date) %>%
+    collect()
   
-  occurrencesOfCondition <- DatabaseConnector::querySql(connection, sqlOccurrencesOfCondition)
-  
-  return (occurrencesOfCondition)
+  return(occurrences)
 }
-
-
-createStartToTargetConditionDF <- function(connection, start_condition_concept_id, target_condition_concept_id) {
-  
-  trajectories_for_start_condition <- getTrajectoriesForCondition(connection, start_condition_concept_id)
-  
-  trajectories_only_start_and_target <- 
-    trajectories_for_start_condition %>% filter(CONCEPT_ID == start_condition_concept_id | CONCEPT_ID == target_condition_concept_id)
-  
-  trajectory_list_for_each_person <- split(trajectories_only_start_and_target, trajectories_only_start_and_target$PERSON_ID)
-  
-  
-  columns= c("person_id", "start_condition_nr", "target_condition_in_1y", "target_condition_in_3y", "target_condition_in_5y")
-  start_to_target_condition = data.frame(matrix(nrow=0, ncol = 5)) 
-  
-  
-  for (trajectory in trajectory_list_for_each_person) {
-    #if (!any(trajectory$CONCEPT_ID == target_condition_concept_id)) next
-    
-    start_conditions <- subset(trajectory, CONCEPT_ID == start_condition_concept_id)
-    target_conditions <- subset(trajectory, CONCEPT_ID == target_condition_concept_id)
-    
-    if (nrow(target_conditions) == 0) {
-      for (i in 1:nrow(start_conditions)) {
-        row <- c(trajectory$PERSON_ID[1], i, FALSE, FALSE, FALSE)
-        start_to_target_condition <- rbind(start_to_target_condition, row)
-      }
-    }
-    
-    person_id <- trajectory$PERSON_ID[1]
-    target_condition_in_1y <- FALSE
-    target_condition_in_3y <- FALSE
-    target_condition_in_5y <- FALSE
-    start_condition_nr <- 1
-    
-    for (start_date in as.list(start_conditions$CONDITION_START_DATE)) {
-      start_plus_1y = start_date + years(1)
-      start_plus_3y = start_date + years(3)
-      start_plus_5y = start_date + years(5)
-      if (nrow(subset(target_conditions, CONDITION_START_DATE >= start_date & CONDITION_START_DATE <= start_plus_1y)) > 0) {
-        target_condition_in_5y <- TRUE
-        target_condition_in_3y <- TRUE
-        target_condition_in_1y <- TRUE
-      }
-      else if (nrow(subset(target_conditions, CONDITION_START_DATE >= start_date & CONDITION_START_DATE <= start_plus_3y)) > 0) {
-        target_condition_in_5y <- TRUE
-        target_condition_in_3y <- TRUE
-        target_condition_in_1y <- FALSE
-      }
-      else if (nrow(subset(target_conditions, CONDITION_START_DATE >= start_date & CONDITION_START_DATE <= start_plus_5y)) > 0) {
-        target_condition_in_5y <- TRUE
-        target_condition_in_3y <- FALSE
-        target_condition_in_1y <- FALSE
-      }
-      else {
-        target_condition_in_5y <- FALSE
-        target_condition_in_3y <- FALSE
-        target_condition_in_1y <- FALSE
-      }
-      
-      row <- c(person_id, start_condition_nr, target_condition_in_1y, target_condition_in_3y, target_condition_in_5y)
-      start_to_target_condition <- rbind(start_to_target_condition, row)
-      start_condition_nr <- start_condition_nr + 1
-    }
-    
-  }
-  colnames(start_to_target_condition) = columns
-  
-  return (start_to_target_condition)
-}
-
-
-
-
-createStartToTargetConditionDF2 <- function(connection, start_condition_concept_id, target_condition_concept_id) {
-  # Load trajectories for the start condition
-  trajectories_for_start_condition <- getTrajectoriesForCondition(connection, start_condition_concept_id)
-  
-  # Ensure CONDITION_START_DATE is in Date format
-  trajectories_for_start_condition$CONDITION_START_DATE <- as.Date(trajectories_for_start_condition$CONDITION_START_DATE)
-  
-  # Filter for rows with only start and target conditions
-  trajectories_only_start_and_target <- trajectories_for_start_condition %>%
-    filter(CONCEPT_ID %in% c(start_condition_concept_id, target_condition_concept_id))
-  
-  # Convert to data.table for faster processing
-  trajectories_dt <- as.data.table(trajectories_only_start_and_target)
-  
-  # Split trajectories by PERSON_ID
-  trajectory_list <- split(trajectories_dt, by = "PERSON_ID")
-  
-  # Initialize an empty list to store results
-  results <- list()
-  
-  # Process each person's trajectory
-  for (trajectory in trajectory_list) {
-    start_conditions <- trajectory[CONCEPT_ID == start_condition_concept_id]
-    target_conditions <- trajectory[CONCEPT_ID == target_condition_concept_id]
-    
-    # If no target conditions, add rows with FALSE for all time windows
-    if (nrow(target_conditions) == 0) {
-      person_results <- start_conditions[, .(
-        person_id = PERSON_ID,
-        start_condition_nr = .I,
-        target_condition_in_1y = FALSE,
-        target_condition_in_3y = FALSE,
-        target_condition_in_5y = FALSE
-      )]
-      results[[length(results) + 1]] <- person_results
-      next
-    }
-    
-    # For each start condition, calculate time windows
-    person_results <- start_conditions[, {
-      start_date <- CONDITION_START_DATE
-      
-      target_in_1y <- any(target_conditions$CONDITION_START_DATE >= as.Date(start_date) &
-                            target_conditions$CONDITION_START_DATE <= (as.Date(start_date) + years(1)))
-      
-      target_in_3y <- any(target_conditions$CONDITION_START_DATE >= as.Date(start_date) &
-                            target_conditions$CONDITION_START_DATE <= (as.Date(start_date) + years(3)))
-      
-      target_in_5y <- any(target_conditions$CONDITION_START_DATE >= as.Date(start_date) &
-                            target_conditions$CONDITION_START_DATE <= (as.Date(start_date) + years(5)))
-      
-      .(
-        person_id = PERSON_ID[1],
-        start_condition_nr = .I,
-        target_condition_in_1y = target_in_1y,
-        target_condition_in_3y = target_in_3y,
-        target_condition_in_5y = target_in_5y
-      )
-    }, by = seq_len(nrow(start_conditions))]
-    results[[length(results) + 1]] <- person_results
-  }
-  
-  # Combine results and return as a data frame
-  final_result <- rbindlist(results, fill = TRUE)
-  return(as.data.frame(final_result))
-}
-
-
 
 createStartToTargetConditionDF4 <- function(trajectories, start_condition_concept_id, target_condition_concept_id) {
   
@@ -261,7 +113,146 @@ calculateStartToTargetPercentages <- function(start_to_target_condition) {
 }
 
 
+#createStartToTargetConditionDF <- function(connection, start_condition_concept_id, target_condition_concept_id) {
+#  
+#  trajectories_for_start_condition <- getTrajectoriesForCondition(connection, start_condition_concept_id)
+#  
+#  trajectories_only_start_and_target <- 
+#    trajectories_for_start_condition %>% filter(CONCEPT_ID == start_condition_concept_id | CONCEPT_ID == target_condition_concept_id)
+#  
+#  trajectory_list_for_each_person <- split(trajectories_only_start_and_target, trajectories_only_start_and_target$PERSON_ID)
+#  
+#  
+#  columns= c("person_id", "start_condition_nr", "target_condition_in_1y", "target_condition_in_3y", "target_condition_in_5y")
+#  start_to_target_condition = data.frame(matrix(nrow=0, ncol = 5)) 
+#  
+#  
+#  for (trajectory in trajectory_list_for_each_person) {
+#    #if (!any(trajectory$CONCEPT_ID == target_condition_concept_id)) next
+#    
+#    start_conditions <- subset(trajectory, CONCEPT_ID == start_condition_concept_id)
+#    target_conditions <- subset(trajectory, CONCEPT_ID == target_condition_concept_id)
+#    
+#    if (nrow(target_conditions) == 0) {
+#      for (i in 1:nrow(start_conditions)) {
+#        row <- c(trajectory$PERSON_ID[1], i, FALSE, FALSE, FALSE)
+#        start_to_target_condition <- rbind(start_to_target_condition, row)
+#      }
+#    }
+#    
+#    person_id <- trajectory$PERSON_ID[1]
+#    target_condition_in_1y <- FALSE
+#    target_condition_in_3y <- FALSE
+#    target_condition_in_5y <- FALSE
+#    start_condition_nr <- 1
+#    
+#    for (start_date in as.list(start_conditions$CONDITION_START_DATE)) {
+#      start_plus_1y = start_date + years(1)
+#      start_plus_3y = start_date + years(3)
+#      start_plus_5y = start_date + years(5)
+#      if (nrow(subset(target_conditions, CONDITION_START_DATE >= start_date & CONDITION_START_DATE <= start_plus_1y)) > 0) {
+#        target_condition_in_5y <- TRUE
+#        target_condition_in_3y <- TRUE
+#        target_condition_in_1y <- TRUE
+#      }
+#      else if (nrow(subset(target_conditions, CONDITION_START_DATE >= start_date & CONDITION_START_DATE <= start_plus_3y)) > 0) {
+#        target_condition_in_5y <- TRUE
+#        target_condition_in_3y <- TRUE
+#        target_condition_in_1y <- FALSE
+#      }
+#      else if (nrow(subset(target_conditions, CONDITION_START_DATE >= start_date & CONDITION_START_DATE <= start_plus_5y)) > 0) {
+#        target_condition_in_5y <- TRUE
+#        target_condition_in_3y <- FALSE
+#        target_condition_in_1y <- FALSE
+#      }
+#      else {
+#        target_condition_in_5y <- FALSE
+#        target_condition_in_3y <- FALSE
+#        target_condition_in_1y <- FALSE
+#      }
+#      
+#      row <- c(person_id, start_condition_nr, target_condition_in_1y, target_condition_in_3y, target_condition_in_5y)
+#      start_to_target_condition <- rbind(start_to_target_condition, row)
+#      start_condition_nr <- start_condition_nr + 1
+#    }
+#    
+#  }
+#  colnames(start_to_target_condition) = columns
+#  
+#  return (start_to_target_condition)
+#}
+#
+#
+#
+#
+#createStartToTargetConditionDF2 <- function(connection, start_condition_concept_id, target_condition_concept_id) {
+#  # Load trajectories for the start condition
+#  trajectories_for_start_condition <- getTrajectoriesForCondition(connection, start_condition_concept_id)
+#  
+#  # Ensure CONDITION_START_DATE is in Date format
+#  trajectories_for_start_condition$CONDITION_START_DATE <- as.Date(trajectories_for_start_condition$CONDITION_START_DATE)
+#  
+#  # Filter for rows with only start and target conditions
+#  trajectories_only_start_and_target <- trajectories_for_start_condition %>%
+#    filter(CONCEPT_ID %in% c(start_condition_concept_id, target_condition_concept_id))
+#  
+#  # Convert to data.table for faster processing
+#  trajectories_dt <- as.data.table(trajectories_only_start_and_target)
+#  
+#  # Split trajectories by PERSON_ID
+#  trajectory_list <- split(trajectories_dt, by = "PERSON_ID")
+#  
+#  # Initialize an empty list to store results
+#  results <- list()
+#  
+#  # Process each person's trajectory
+#  for (trajectory in trajectory_list) {
+#    start_conditions <- trajectory[CONCEPT_ID == start_condition_concept_id]
+#    target_conditions <- trajectory[CONCEPT_ID == target_condition_concept_id]
+#    
+#    # If no target conditions, add rows with FALSE for all time windows
+#    if (nrow(target_conditions) == 0) {
+#      person_results <- start_conditions[, .(
+#        person_id = PERSON_ID,
+#        start_condition_nr = .I,
+#        target_condition_in_1y = FALSE,
+#        target_condition_in_3y = FALSE,
+#        target_condition_in_5y = FALSE
+#      )]
+#      results[[length(results) + 1]] <- person_results
+#      next
+#    }
+#    
+#    # For each start condition, calculate time windows
+#    person_results <- start_conditions[, {
+#      start_date <- CONDITION_START_DATE
+#      
+#      target_in_1y <- any(target_conditions$CONDITION_START_DATE >= as.Date(start_date) &
+#                            target_conditions$CONDITION_START_DATE <= (as.Date(start_date) + years(1)))
+#      
+#      target_in_3y <- any(target_conditions$CONDITION_START_DATE >= as.Date(start_date) &
+#                            target_conditions$CONDITION_START_DATE <= (as.Date(start_date) + years(3)))
+#      
+#      target_in_5y <- any(target_conditions$CONDITION_START_DATE >= as.Date(start_date) &
+#                            target_conditions$CONDITION_START_DATE <= (as.Date(start_date) + years(5)))
+#      
+#      .(
+#        person_id = PERSON_ID[1],
+#        start_condition_nr = .I,
+#        target_condition_in_1y = target_in_1y,
+#        target_condition_in_3y = target_in_3y,
+#        target_condition_in_5y = target_in_5y
+#      )
+#    }, by = seq_len(nrow(start_conditions))]
+#    results[[length(results) + 1]] <- person_results
+#  }
+#  
+#  # Combine results and return as a data frame
+#  final_result <- rbindlist(results, fill = TRUE)
+#  return(as.data.frame(final_result))
+#}
 
-#connection <- DatabaseConnector::connect(dbms = "sqlite", server = "c:/temp/EunomiaData/GiBleed_5.3.sqlite")
-#trajectories_for_condition <- getTrajectoriesForCondition(connection, 40481087)
-#DatabaseConnector::disconnect(connection)
+
+
+
+

@@ -9,6 +9,35 @@
     ]
   },
   "Packages": {
+    "CDMConnector": {
+      "Package": "CDMConnector",
+      "Version": "1.7.0",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Requirements": [
+        "DBI",
+        "R",
+        "checkmate",
+        "cli",
+        "dbplyr",
+        "dplyr",
+        "generics",
+        "glue",
+        "jsonlite",
+        "lifecycle",
+        "methods",
+        "omopgenerics",
+        "purrr",
+        "readr",
+        "rlang",
+        "stringi",
+        "stringr",
+        "tidyr",
+        "tidyselect",
+        "withr"
+      ],
+      "Hash": "5233515358b0c45cd01e0d19573f0709"
+    },
     "DBI": {
       "Package": "DBI",
       "Version": "1.2.3",
@@ -772,6 +801,29 @@
       ],
       "Hash": "a623a2239e642806158bc4dc3f51565d"
     },
+    "omopgenerics": {
+      "Package": "omopgenerics",
+      "Version": "0.4.1",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Requirements": [
+        "R",
+        "cli",
+        "dbplyr",
+        "dplyr",
+        "generics",
+        "glue",
+        "lifecycle",
+        "methods",
+        "purrr",
+        "rlang",
+        "snakecase",
+        "stringr",
+        "tidyr",
+        "vctrs"
+      ],
+      "Hash": "072f4e363174ababd20aeab7926d5797"
+    },
     "pillar": {
       "Package": "pillar",
       "Version": "1.9.0",
@@ -1008,6 +1060,18 @@
         "xtable"
       ],
       "Hash": "6a293995a66e12c48d13aa1f957d09c7"
+    },
+    "snakecase": {
+      "Package": "snakecase",
+      "Version": "0.11.1",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Requirements": [
+        "R",
+        "stringi",
+        "stringr"
+      ],
+      "Hash": "58767e44739b76965332e8a4fe3f91f1"
     },
     "sourcetools": {
       "Package": "sourcetools",

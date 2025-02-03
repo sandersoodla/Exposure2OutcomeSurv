@@ -16,8 +16,16 @@ library(ggplot2)
 ui <- fluidPage(
     theme = bs_theme(bootswatch = "cerulean"),
 
-    # Application title
-    titlePanel("Start condition to target condition overview"),
+    fluidRow(
+        column(width = 11,
+            # Application title
+            titlePanel("Start condition to target condition overview")
+        ),
+        column(width = 1,
+            textOutput("dbName"),
+            textOutput("personCount")
+        )
+    ),
 
     
     sidebarLayout(
@@ -66,17 +74,43 @@ ui <- fluidPage(
 source("scripts/getConditionInfo.R")
 source("scripts/conditionToCondition.R")
 source("scripts/demographicAnalysis.R")
+source("scripts/getMetadata.R")
 
 
 
 # Define server logic 
 server <- function(input, output, session) {
   
-    connection <- DatabaseConnector::connect(dbms = "sqlite", server = "c:/temp/EunomiaData/GiBleed_5.3.sqlite")
+    DATABASE <- paste(Sys.getenv("DB_HOST"),"/",Sys.getenv("DB_NAME"),sep='')
+    DB_USER <- Sys.getenv('DB_USERNAME')
+    DB_PASSWORD <- Sys.getenv('DB_PASSWORD')
+    DB_PORT <- Sys.getenv('DB_PORT')
     
-    output$startConditionText <- renderText(paste(input$startConditionId, getConditionInfo(connection, input$startConditionId)))
     
-    output$targetConditionText <- renderText(paste(input$targetConditionId, getConditionInfo(connection, input$targetConditionId)))
+    #connectionDetails <- DatabaseConnector::createConnectionDetails(
+    #  dbms = "your_dbms",
+    #  server = "your_server_address",
+    #  user = "your_username",
+    #  password = "your_password",
+    #  schema = "your_cdm_schema",
+    #  port = 1
+    #)
+    
+    connectionDetails <- DatabaseConnector::createConnectionDetails(dbms = "duckdb", server = "c:/temp/EunomiaData/GiBleed_5.3.duckdb")
+    connection <- DatabaseConnector::connect(connectionDetails)
+    
+    cdm <- CDMConnector::cdmFromCon(connection, cdmSchema = NULL)
+    cdmVocab <- CDMConnector::cdmFromCon(connection, cdmSchema = NULL)
+    
+    
+    metadata <- getMetadata(cdm)
+    
+    output$dbName <- renderText(metadata$dbName)
+    output$personCount <- renderText(paste("n = ", metadata$personCount))
+    
+    output$startConditionText <- renderText(paste(input$startConditionId, getConditionInfo(cdm, input$startConditionId)))
+    
+    output$targetConditionText <- renderText(paste(input$targetConditionId, getConditionInfo(cdm, input$targetConditionId)))
     
     
     # Reactive expression to fetch data when the button is clicked
@@ -84,7 +118,7 @@ server <- function(input, output, session) {
       req(input$startConditionId > 0)
       req(input$targetConditionId > 0)
       
-      df <- getTrajectoriesForCondition(connection, input$startConditionId)
+      df <- getTrajectoriesForCondition(cdm, input$startConditionId)
       return(df)
     })
     
@@ -158,7 +192,7 @@ server <- function(input, output, session) {
       req(trajectoriesData())
       req(input$startConditionId > 0)
 
-      createPopulationPyramidForCondition(connection, input$startConditionId)
+      createPopulationPyramidForCondition(cdm, input$startConditionId)
       
     })
     
@@ -166,7 +200,7 @@ server <- function(input, output, session) {
       req(trajectoriesData())
       req(input$targetConditionId > 0)
       
-      createPopulationPyramidForCondition(connection, input$targetConditionId)
+      createPopulationPyramidForCondition(cdm, input$targetConditionId)
       
     })
     
@@ -174,7 +208,7 @@ server <- function(input, output, session) {
     
     session$onSessionEnded(function() {
       # disconnect DB
-      DatabaseConnector::disconnect(connection)
+      CDMConnector::cdmDisconnect(cdm)
     })
 }
 

@@ -1,63 +1,54 @@
-source("scripts/conditionToCondition.R")
+library(lubridate)
 
-
-createPopulationPyramidForCondition <- function(connection, conditionConceptID) {
-
-  sql <- 
-    SqlRender::render("SELECT c.person_id,
-             c.condition_start_date,
-             p.gender_concept_id,
-             p.birth_datetime
-      FROM condition_occurrence c
-      JOIN person p ON c.person_id = p.person_id
-      WHERE c.condition_concept_id = @condition_concept_id",
-      condition_concept_id = conditionConceptID)
+createPopulationPyramidForCondition <- function(cdm, conditionConceptId) {
   
-  data <- DatabaseConnector::querySql(connection, sql)
+  data <- cdm$condition_occurrence %>%
+    filter(condition_concept_id == conditionConceptId) %>%
+    inner_join(cdm$person, by = "person_id") %>%
+    collect()
   
   # Calculate age at condition occurrence
-  data$AGE <- floor(as.numeric(difftime(data$CONDITION_START_DATE, data$BIRTH_DATETIME, units = "days")) / 365.25)
+  data <- data %>%
+    mutate(age_at_occurrence = floor(time_length(condition_start_date - birth_datetime, unit = "years")))
   
   # Map gender_concept_id to gender labels
-  data$GENDER <- ifelse(data$GENDER_CONCEPT_ID == 8507, "Male",
-                        ifelse(data$GENDER_CONCEPT_ID == 8532, "Female", "Other"))
+  data <- data %>%
+    mutate(gender = case_when(
+      gender_concept_id == 8507 ~ "Male",
+      gender_concept_id == 8532 ~ "Female",
+      TRUE ~ "Other"
+    ))
   
   # Aggregate counts by age and gender
-  age_gender_counts <- data %>%
-    group_by(AGE, GENDER) %>%
-    summarise(COUNT = n()) %>%
+  ageGenderCounts <- data %>%
+    group_by(age_at_occurrence, gender) %>%
+    summarize(count = n(),.groups = "drop") %>%
     ungroup()
   
+  # Negative values for Male gender
+  ageGenderCounts <- ageGenderCounts %>%
+    mutate(count = ifelse(gender == "Male", -count, count))
   
-  # Negative values for Male gender 
-  age_gender_counts <- age_gender_counts %>%
-    mutate(COUNT = ifelse(GENDER == "Male", -COUNT, COUNT))
-  
-  
-  # Plot the population pyramid
-  pyramid_plot <- ggplot(age_gender_counts, aes(x = AGE, y = COUNT, fill = GENDER)) +
-    geom_bar(data = subset(age_gender_counts, GENDER == "Male"), stat = "identity") +
-    geom_bar(data = subset(age_gender_counts, GENDER == "Female"), stat = "identity") +
+  # Plot the population pyramid (ggplot2)
+  library(ggplot2)
+  pyramidPlot <- ggplot(ageGenderCounts, aes(x = age_at_occurrence, y = count, fill = gender)) +
+    geom_bar(stat = "identity") +
     coord_flip() +
     scale_y_continuous(labels = abs) +
-    labs(title = paste("Population Pyramid for Condition Concept ID", conditionConceptID),
+    labs(title = paste("Population Pyramid for Condition Concept ID", conditionConceptId),
          x = "Age",
          y = "Number of Occurrences") +
     theme_minimal()
   
-  return (pyramid_plot)
+  return(pyramidPlot)
 }
 
 
-getPersonInfo <- function(connection, personID) {
+getPersonInfo <- function(cdm, personId) {
   
-  sqlPersonInfo <- 
-    SqlRender::render("SELECT person_id, gender_concept_id, birth_datetime
-                      FROM person
-                      WHERE person_id = @id",
-                      id = personID)
+  personInfo <- cdm$person %>%
+    filter(person_id == personId) %>%
+    collect()
   
-  personInfo <- DatabaseConnector::querySql(connection, sqlPersonInfo)
-  
-  return (personInfo)
+  return(personInfo)
 }
