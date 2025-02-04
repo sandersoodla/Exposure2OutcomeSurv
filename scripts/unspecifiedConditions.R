@@ -13,7 +13,7 @@ getUnspecifiedConditionOccurrenceCount <- function(connection, filename) {
   
   conditionsCount <- querySql(connection, render(sqlConditionsCount))
   
-  unclassifiedInData <- merge(conditionsCount, unclassifiedConditions, by.x = "CONCEPT_ID", by.y = "Id")
+  unclassifiedInData <- merge(conditionsCount, unclassifiedConditions, by.x = "concept_id", by.y = "Id")
   
   return (unclassifiedInData)
 }

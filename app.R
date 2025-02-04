@@ -100,7 +100,6 @@ server <- function(input, output, session) {
     connection <- DatabaseConnector::connect(connectionDetails)
     
     cdm <- CDMConnector::cdmFromCon(connection, cdmSchema = NULL)
-    cdmVocab <- CDMConnector::cdmFromCon(connection, cdmSchema = NULL)
     
     
     metadata <- getMetadata(cdm)
@@ -165,7 +164,7 @@ server <- function(input, output, session) {
       updateSelectizeInput(
         session,
         "selectedPatient",
-        choices = unique(trajectoriesData()$PERSON_ID),
+        choices = unique(trajectoriesData()$person_id),
         server = TRUE
       )
     })
@@ -175,7 +174,7 @@ server <- function(input, output, session) {
       req(trajectoriesData())
       req(input$selectedPatient)
       patientData <- trajectoriesData() %>%
-        filter(PERSON_ID == input$selectedPatient)
+        filter(person_id == input$selectedPatient)
       
       ggplot(patientData, aes(x = CONDITION_START_DATE, y = CONCEPT_NAME)) +
         geom_point() +

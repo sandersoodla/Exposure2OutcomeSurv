@@ -5,11 +5,12 @@ createPopulationPyramidForCondition <- function(cdm, conditionConceptId) {
   data <- cdm$condition_occurrence %>%
     filter(condition_concept_id == conditionConceptId) %>%
     inner_join(cdm$person, by = "person_id") %>%
+    select(person_id, gender_concept_id, condition_start_datetime, birth_datetime) %>%
     collect()
   
   # Calculate age at condition occurrence
   data <- data %>%
-    mutate(age_at_occurrence = floor(time_length(condition_start_date - birth_datetime, unit = "years")))
+    mutate(age_at_occurrence = floor(time_length(condition_start_datetime - birth_datetime, unit = "years")))
   
   # Map gender_concept_id to gender labels
   data <- data %>%

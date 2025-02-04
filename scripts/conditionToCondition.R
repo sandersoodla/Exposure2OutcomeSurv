@@ -7,14 +7,15 @@ library(data.table)
 
 getTrajectoriesForCondition <- function(cdm, conditionConceptID) {
   
-  condition_people <- cdm$condition_occurrence %>%
-    filter(condition_concept_id == conditionConceptID) %>%
-    distinct(person_id) %>%
-    collect()  # Bring the person_ids into R for the next step
-  
   trajectories <- cdm$condition_occurrence %>%
-    inner_join(condition_people, by = "person_id") %>%  # Filter to only people with the condition
-    inner_join(cdm$concept, by = c("condition_concept_id" = "concept_id")) %>%  # Get concept names
+    # Keep only rows for persons who have the conditionConceptID
+    semi_join(
+      cdm$condition_occurrence %>%
+        filter(condition_concept_id == conditionConceptID) %>%
+        distinct(person_id),
+      by = "person_id"
+    ) %>%
+    inner_join(cdm$concept, by = c("condition_concept_id" = "concept_id"), keep = TRUE) %>%  # Get concept names
     select(person_id, concept_id, concept_name, condition_start_date) %>%
     arrange(person_id, condition_start_date) %>%
     collect()
@@ -41,38 +42,38 @@ createStartToTargetConditionDF4 <- function(trajectories, start_condition_concep
   trajectories_for_start_condition <- trajectories
   
   trajectories_only_start_and_target <- trajectories_for_start_condition %>%
-    filter(CONCEPT_ID == start_condition_concept_id | CONCEPT_ID == target_condition_concept_id)
+    filter(concept_id == start_condition_concept_id | concept_id == target_condition_concept_id)
   
   # Separate start and target conditions
   start_conditions <- trajectories_only_start_and_target %>%
-    filter(CONCEPT_ID == start_condition_concept_id) %>%
-    arrange(PERSON_ID, CONDITION_START_DATE) %>%
-    group_by(PERSON_ID) %>%
+    filter(concept_id == start_condition_concept_id) %>%
+    arrange(person_id, condition_start_date) %>%
+    group_by(person_id) %>%
     mutate(start_condition_nr = row_number()) %>%
     ungroup()
   
   target_conditions <- trajectories_only_start_and_target %>%
-    filter(CONCEPT_ID == target_condition_concept_id)
+    filter(concept_id == target_condition_concept_id)
   
   if (nrow(start_conditions) == 0) {
     return(data.frame())
   }
   
-  # Join start and target conditions on PERSON_ID
+  # Join start and target conditions on person_id
   # For each start condition, find the earliest target condition after it
   start_target_combinations <- start_conditions %>%
-    inner_join(target_conditions, by = "PERSON_ID", suffix = c("_start", "_target"), relationship = "many-to-many") %>%
-    filter(CONDITION_START_DATE_target >= CONDITION_START_DATE_start) %>%
-    mutate(time_diff_days = as.numeric(difftime(CONDITION_START_DATE_target, CONDITION_START_DATE_start, units = "days")))
+    inner_join(target_conditions, by = "person_id", suffix = c("_start", "_target"), relationship = "many-to-many") %>%
+    filter(condition_start_date_target >= condition_start_date_start) %>%
+    mutate(time_diff_days = as.numeric(difftime(condition_start_date_target, condition_start_date_start, units = "days")))
   
   # Find the minimum time difference for each start condition occurrence
   min_time_diffs <- start_target_combinations %>%
-    group_by(PERSON_ID, start_condition_nr) %>%
+    group_by(person_id, start_condition_nr) %>%
     summarize(min_time_diff_days = min(time_diff_days), .groups = "drop")
   
   # Merge back to start conditions
   start_conditions <- start_conditions %>%
-    left_join(min_time_diffs, by = c("PERSON_ID", "start_condition_nr"))
+    left_join(min_time_diffs, by = c("person_id", "start_condition_nr"))
   
   # Compute boolean flags for target condition occurrences within time frames
   start_conditions <- start_conditions %>%
@@ -85,7 +86,7 @@ createStartToTargetConditionDF4 <- function(trajectories, start_condition_concep
   # Select required columns
   start_to_target_condition <- start_conditions %>%
     select(
-      person_id = PERSON_ID,
+      person_id = person_id,
       start_condition_nr,
       target_condition_in_1y,
       target_condition_in_3y,
@@ -118,9 +119,9 @@ calculateStartToTargetPercentages <- function(start_to_target_condition) {
 #  trajectories_for_start_condition <- getTrajectoriesForCondition(connection, start_condition_concept_id)
 #  
 #  trajectories_only_start_and_target <- 
-#    trajectories_for_start_condition %>% filter(CONCEPT_ID == start_condition_concept_id | CONCEPT_ID == target_condition_concept_id)
+#    trajectories_for_start_condition %>% filter(concept_id == start_condition_concept_id | concept_id == target_condition_concept_id)
 #  
-#  trajectory_list_for_each_person <- split(trajectories_only_start_and_target, trajectories_only_start_and_target$PERSON_ID)
+#  trajectory_list_for_each_person <- split(trajectories_only_start_and_target, trajectories_only_start_and_target$person_id)
 #  
 #  
 #  columns= c("person_id", "start_condition_nr", "target_condition_in_1y", "target_condition_in_3y", "target_condition_in_5y")
@@ -128,19 +129,19 @@ calculateStartToTargetPercentages <- function(start_to_target_condition) {
 #  
 #  
 #  for (trajectory in trajectory_list_for_each_person) {
-#    #if (!any(trajectory$CONCEPT_ID == target_condition_concept_id)) next
+#    #if (!any(trajectory$concept_id == target_condition_concept_id)) next
 #    
-#    start_conditions <- subset(trajectory, CONCEPT_ID == start_condition_concept_id)
-#    target_conditions <- subset(trajectory, CONCEPT_ID == target_condition_concept_id)
+#    start_conditions <- subset(trajectory, concept_id == start_condition_concept_id)
+#    target_conditions <- subset(trajectory, concept_id == target_condition_concept_id)
 #    
 #    if (nrow(target_conditions) == 0) {
 #      for (i in 1:nrow(start_conditions)) {
-#        row <- c(trajectory$PERSON_ID[1], i, FALSE, FALSE, FALSE)
+#        row <- c(trajectory$person_id[1], i, FALSE, FALSE, FALSE)
 #        start_to_target_condition <- rbind(start_to_target_condition, row)
 #      }
 #    }
 #    
-#    person_id <- trajectory$PERSON_ID[1]
+#    person_id <- trajectory$person_id[1]
 #    target_condition_in_1y <- FALSE
 #    target_condition_in_3y <- FALSE
 #    target_condition_in_5y <- FALSE
@@ -194,26 +195,26 @@ calculateStartToTargetPercentages <- function(start_to_target_condition) {
 #  
 #  # Filter for rows with only start and target conditions
 #  trajectories_only_start_and_target <- trajectories_for_start_condition %>%
-#    filter(CONCEPT_ID %in% c(start_condition_concept_id, target_condition_concept_id))
+#    filter(concept_id %in% c(start_condition_concept_id, target_condition_concept_id))
 #  
 #  # Convert to data.table for faster processing
 #  trajectories_dt <- as.data.table(trajectories_only_start_and_target)
 #  
-#  # Split trajectories by PERSON_ID
-#  trajectory_list <- split(trajectories_dt, by = "PERSON_ID")
+#  # Split trajectories by person_id
+#  trajectory_list <- split(trajectories_dt, by = "person_id")
 #  
 #  # Initialize an empty list to store results
 #  results <- list()
 #  
 #  # Process each person's trajectory
 #  for (trajectory in trajectory_list) {
-#    start_conditions <- trajectory[CONCEPT_ID == start_condition_concept_id]
-#    target_conditions <- trajectory[CONCEPT_ID == target_condition_concept_id]
+#    start_conditions <- trajectory[concept_id == start_condition_concept_id]
+#    target_conditions <- trajectory[concept_id == target_condition_concept_id]
 #    
 #    # If no target conditions, add rows with FALSE for all time windows
 #    if (nrow(target_conditions) == 0) {
 #      person_results <- start_conditions[, .(
-#        person_id = PERSON_ID,
+#        person_id = person_id,
 #        start_condition_nr = .I,
 #        target_condition_in_1y = FALSE,
 #        target_condition_in_3y = FALSE,
@@ -237,7 +238,7 @@ calculateStartToTargetPercentages <- function(start_to_target_condition) {
 #                            target_conditions$CONDITION_START_DATE <= (as.Date(start_date) + years(5)))
 #      
 #      .(
-#        person_id = PERSON_ID[1],
+#        person_id = person_id[1],
 #        start_condition_nr = .I,
 #        target_condition_in_1y = target_in_1y,
 #        target_condition_in_3y = target_in_3y,
