@@ -86,6 +86,8 @@ server <- function(input, output, session) {
     DB_PASSWORD <- Sys.getenv('DB_PASSWORD')
     DB_PORT <- Sys.getenv('DB_PORT')
     
+    CDM_SCHEMA <- Sys.getenv("CDM_SCHEMA")
+    WRITE_SCHEMA <- Sys.getenv("WRITE_SCHEMA")
     
     #connectionDetails <- DatabaseConnector::createConnectionDetails(
     #  dbms = "your_dbms",
@@ -96,10 +98,12 @@ server <- function(input, output, session) {
     #  port = 1
     #)
     
-    connectionDetails <- DatabaseConnector::createConnectionDetails(dbms = "duckdb", server = "c:/temp/EunomiaData/GiBleed_5.3.duckdb")
-    connection <- DatabaseConnector::connect(connectionDetails)
+    #connectionDetails <- DatabaseConnector::createConnectionDetails(dbms = "duckdb", server = "c:/temp/EunomiaData/GiBleed_5.3.duckdb")
+    #connection <- DatabaseConnector::connect(connectionDetails)
     
-    cdm <- CDMConnector::cdmFromCon(connection, cdmSchema = NULL)
+    connection <- DBI::dbConnect(duckdb::duckdb(), dbdir = "c:/temp/EunomiaData/GiBleed_5.3.duckdb")
+    
+    cdm <- CDMConnector::cdmFromCon(connection, cdmSchema = CDM_SCHEMA, writeSchema = WRITE_SCHEMA)
     
     
     metadata <- getMetadata(cdm)
@@ -176,7 +180,7 @@ server <- function(input, output, session) {
       patientData <- trajectoriesData() %>%
         filter(person_id == input$selectedPatient)
       
-      ggplot(patientData, aes(x = CONDITION_START_DATE, y = CONCEPT_NAME)) +
+      ggplot(patientData, aes(x = condition_start_date, y = concept_name)) +
         geom_point() +
         labs(
           title = paste("Condition timeline for Patient", input$selectedPatient),
