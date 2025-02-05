@@ -1,7 +1,7 @@
 getMetadata <- function(cdm) {
   
   dbName <- Sys.getenv("DB_NAME")
-  cdmSchema <- cdm$schema
+  cdmSchema <- Sys.getenv("CDM_SCHEMA")
   
   personCount <- cdm$person %>%
     count() %>%
