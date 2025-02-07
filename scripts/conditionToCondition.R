@@ -15,7 +15,7 @@ getTrajectoriesForCondition <- function(cdm, conditionConceptID) {
         distinct(person_id),
       by = "person_id"
     ) %>%
-    inner_join(cdm$concept, by = c("condition_concept_id" = "concept_id"), keep = TRUE) %>%  # Get concept names
+    inner_join(cdm$concept, by = c("condition_concept_id" = "concept_id"), keep = TRUE) %>%
     select(person_id, concept_id, concept_name, condition_start_date) %>%
     arrange(person_id, condition_start_date) %>%
     collect()

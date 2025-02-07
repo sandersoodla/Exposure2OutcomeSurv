@@ -14,57 +14,71 @@ library(ggplot2)
 
 # Define UI for application 
 ui <- fluidPage(
-    theme = bs_theme(bootswatch = "cerulean"),
-
-    fluidRow(
-        column(width = 11,
-            # Application title
-            titlePanel("Start condition to target condition overview")
-        ),
-        column(width = 1,
-            textOutput("dbName"),
-            textOutput("personCount")
-        )
+  theme = bs_theme(bootswatch = "cerulean"),
+  
+  fluidRow(
+    column(width = 11,
+           # Application title
+           titlePanel("Start condition to target condition overview")
     ),
-
-    
-    sidebarLayout(
-        sidebarPanel(
-            numericInput("startConditionId", "Start Condition concept id", value = "40481087", min = 0),
-            textOutput("startConditionText"),
-            hr(),
-            numericInput("targetConditionId", "Target Condition concept id", value = "372328", min = 0),
-            textOutput("targetConditionText"),
-            actionButton("getData", "Get stats"),
-            hr(),
-            selectizeInput(
-              "selectedPatient",
-              "Select a Patient ID:",
-              choices = NULL  # Initialize with no choices
-            ),
-            width = 3
-        ),
-
-        mainPanel(
-            textOutput("percentageOfTargetText"),
-            textOutput("percentageOfTarget1"),
-            textOutput("percentageOfTarget3"),
-            textOutput("percentageOfTarget5"),
-            
-            tabsetPanel(
-                tabPanel("Demographic overview", 
-                    fluidRow(
-                      column(6, plotOutput("patientPyramid1")),
-                      column(6, plotOutput("patientPyramid2"))
-                    ),
-                ),
-                tabPanel("Trajectories containing start condition", DTOutput("trajectoryTable")),
-                tabPanel("Patient Timeline", plotOutput("patientTimeline")),
-                tabPanel("Start to target", DTOutput("startToTargetConditionTable"))
-            ),
-            width = 9
-        )
+    column(width = 1,
+           textOutput("dbName"),
+           textOutput("personCount")
     )
+  ),
+  
+  
+  sidebarLayout(
+    sidebarPanel(
+      selectizeInput(
+        "startConditionId",
+        "Start Condition concept id",
+        choices = NULL,
+        selected = "",
+        multiple = FALSE,
+        options = list(placeholder = "Type to search conditions")
+      ),
+      textOutput("startConditionText"),
+      hr(),
+      selectizeInput(
+        "targetConditionId",
+        "Target Condition concept id",
+        choices = NULL,
+        selected = "",
+        multiple = FALSE,
+        options = list(placeholder = "Type to search conditions")
+      ),
+      textOutput("targetConditionText"),
+      actionButton("getData", "Get stats"),
+      hr(),
+      selectizeInput(
+        "selectedPatient",
+        "Select a Patient ID:",
+        choices = NULL  # Initialize with no choices
+      ),
+      width = 3
+    ),
+    
+    mainPanel(
+      textOutput("percentageOfTargetText"),
+      textOutput("percentageOfTarget1"),
+      textOutput("percentageOfTarget3"),
+      textOutput("percentageOfTarget5"),
+      
+      tabsetPanel(
+        tabPanel("Demographic overview", 
+                 fluidRow(
+                   column(6, plotOutput("patientPyramid1")),
+                   column(6, plotOutput("patientPyramid2"))
+                 ),
+        ),
+        tabPanel("Trajectories containing start condition", DTOutput("trajectoryTable")),
+        tabPanel("Patient Timeline", plotOutput("patientTimeline")),
+        tabPanel("Start to target", DTOutput("startToTargetConditionTable"))
+      ),
+      width = 9
+    )
+  )
 )
 
 
@@ -75,144 +89,221 @@ source("scripts/getConditionInfo.R")
 source("scripts/conditionToCondition.R")
 source("scripts/demographicAnalysis.R")
 source("scripts/getMetadata.R")
+source("scripts/conceptRelations.R")
 
 
 
 # Define server logic 
 server <- function(input, output, session) {
   
-    DATABASE <- paste(Sys.getenv("DB_HOST"),"/",Sys.getenv("DB_NAME"),sep='')
-    DB_USER <- Sys.getenv('DB_USERNAME')
-    DB_PASSWORD <- Sys.getenv('DB_PASSWORD')
-    DB_PORT <- Sys.getenv('DB_PORT')
-    
-    CDM_SCHEMA <- Sys.getenv("CDM_SCHEMA")
-    WRITE_SCHEMA <- Sys.getenv("WRITE_SCHEMA")
-    
-    #connectionDetails <- DatabaseConnector::createConnectionDetails(
-    #  dbms = "your_dbms",
-    #  server = "your_server_address",
-    #  user = "your_username",
-    #  password = "your_password",
-    #  schema = "your_cdm_schema",
-    #  port = 1
-    #)
-    
-    #connectionDetails <- DatabaseConnector::createConnectionDetails(dbms = "duckdb", server = "c:/temp/EunomiaData/GiBleed_5.3.duckdb")
-    #connection <- DatabaseConnector::connect(connectionDetails)
-    
-    connection <- DBI::dbConnect(duckdb::duckdb(), dbdir = "c:/temp/EunomiaData/GiBleed_5.3.duckdb")
-    
-    cdm <- CDMConnector::cdmFromCon(connection, cdmSchema = CDM_SCHEMA, writeSchema = WRITE_SCHEMA)
-    
-    
-    metadata <- getMetadata(cdm)
-    
-    output$dbName <- renderText(metadata$dbName)
-    output$personCount <- renderText(paste("n = ", metadata$personCount))
-    
-    output$startConditionText <- renderText(paste(input$startConditionId, getConditionInfo(cdm, input$startConditionId)))
-    
-    output$targetConditionText <- renderText(paste(input$targetConditionId, getConditionInfo(cdm, input$targetConditionId)))
-    
-    
-    # Reactive expression to fetch data when the button is clicked
-    trajectoriesData <- eventReactive(input$getData, {
-      req(input$startConditionId > 0)
-      req(input$targetConditionId > 0)
+  #################### CONNECTION SETUP ###########
+  
+  DATABASE <- paste(Sys.getenv("DB_HOST"),"/",Sys.getenv("DB_NAME"),sep='')
+  DB_USER <- Sys.getenv('DB_USERNAME')
+  DB_PASSWORD <- Sys.getenv('DB_PASSWORD')
+  DB_PORT <- Sys.getenv('DB_PORT')
+  
+  CDM_SCHEMA <- Sys.getenv("CDM_SCHEMA")
+  WRITE_SCHEMA <- Sys.getenv("WRITE_SCHEMA")
+  
+  #connectionDetails <- DatabaseConnector::createConnectionDetails(
+  #  dbms = "your_dbms",
+  #  server = "your_server_address",
+  #  user = "your_username",
+  #  password = "your_password",
+  #  schema = "your_cdm_schema",
+  #  port = 1
+  #)
+  
+  #connectionDetails <- DatabaseConnector::createConnectionDetails(dbms = "duckdb", server = "c:/temp/EunomiaData/GiBleed_5.3.duckdb")
+  #connection <- DatabaseConnector::connect(connectionDetails)
+  
+  connection <- DBI::dbConnect(duckdb::duckdb(), dbdir = "c:/temp/EunomiaData/GiBleed_5.3.duckdb")
+  
+  cdm <- CDMConnector::cdmFromCon(connection, cdmSchema = CDM_SCHEMA, writeSchema = WRITE_SCHEMA)
+  
+  
+  
+  ############################# OUTPUTS ##############
+  
+  
+  # METADATA
+  metadata <- getMetadata(cdm)
+  
+  output$dbName <- renderText(metadata$dbName)
+  output$personCount <- renderText(paste("n = ", metadata$personCount))
+  
+  
+  ######### CONDITION INPUT
+  
+  # Update choices for selectizeInput
+  updateConditionChoices <- function(session, inputId, conceptId = "") {
+    print(paste("Updating choices for:", inputId, "with conceptId:", conceptId))
+    if (conceptId == "" | is.na(conceptId)) {
+      # Fetch all condition concepts for initial choices using getAllConditions function
+      allConditionConcepts <- getAllConditions(cdm)
       
-      df <- getTrajectoriesForCondition(cdm, input$startConditionId)
-      return(df)
-    })
-    
-    startToTargetConditionDF <- eventReactive(trajectoriesData(), {
-      req(trajectoriesData())
+      choiceList <- setNames(allConditionConcepts$concept_id, allConditionConcepts$concept_name_id)
+      updateSelectizeInput(session, inputId, choices = choiceList, server = FALSE,
+                           selected = "",
+                           options = list(
+                             placeholder = "Type to search conditions",
+                             maxOptions = 10,
+                             searchField = "label"
+                           ))
       
-      df <- createStartToTargetConditionDF4(trajectoriesData(), input$startConditionId, input$targetConditionId)
-      return(df)
-    })
+    } else {
+      # Fetch related concepts for dynamic update
+      choices <- getRelatedConcepts(cdm, conceptId)
+      choiceList <- setNames(choices$concept_id, choices$concept_name_id)
+      updateSelectizeInput(session, inputId, choices = choiceList, server = FALSE,
+                           #selected = input[[inputId]], # Keep the current selection
+                           options = list(
+                             placeholder = "Type to search related conditions",
+                             maxOptions = 10,
+                             searchField = "label"
+                           ))
+    }
+  }
+  
+  
+  ## Initialize start condition choices
+  updateConditionChoices(session, "startConditionId", "")
+  
+  ## Initialize target condition choices
+  updateConditionChoices(session, "targetConditionId", "")
+  
+  
+  
+  # Reactively update start condition choices based on selection using observeEvent
+  observeEvent(input$startConditionId, {
+    selectedStartId <- input$startConditionId
+    if (!is.null(selectedStartId) && selectedStartId != "") {
+      updateConditionChoices(session, "startConditionId", selectedStartId) # Update choices to related concepts for *startConditionId*
+    } else {
+      updateConditionChoices(session, "startConditionId", "") # Reset choices when input is cleared
+    }
+  }, ignoreNULL = FALSE, ignoreInit = TRUE)
+  
+  
+  # Reactively update target condition choices based on selection using observeEvent
+  observeEvent(input$targetConditionId, {
+    selectedTargetId <- input$targetConditionId
+    if (!is.null(selectedTargetId) && selectedTargetId != "") {
+      updateConditionChoices(session, "targetConditionId", selectedTargetId) # Update choices to related concepts for *targetConditionId*
+    } else {
+      updateConditionChoices(session, "targetConditionId", "") # Reset choices when input is cleared
+    }
+  }, ignoreNULL = FALSE, ignoreInit = TRUE)
+  
+  
+  
+  
+  #output$startConditionText <- renderText(paste(input$startConditionId, getConditionName(cdm, input$startConditionId)))
+  
+  #output$targetConditionText <- renderText(paste(input$targetConditionId, getConditionName(cdm, input$targetConditionId)))
+  
+  
+  ############### TRAJECTORY DATA
+  
+  
+  # Reactive expression to fetch data when the button is clicked
+  trajectoriesData <- eventReactive(input$getData, {
+    req(input$startConditionId > 0)
+    req(input$targetConditionId > 0)
     
-    resultPercentages <- reactive({
-      calculateStartToTargetPercentages(startToTargetConditionDF())
-    })
-
-    output$percentageOfTargetText <- renderText("Chance of target condition from start condition")
-    output$percentageOfTarget1 <- renderText(paste("in 1 year:", resultPercentages()$target_percentage_1y, "%"))
-    output$percentageOfTarget3 <- renderText(paste("in 3 years:", resultPercentages()$target_percentage_3y, "%"))
-    output$percentageOfTarget5 <- renderText(paste("in 5 years:", resultPercentages()$target_percentage_5y, "%"))
+    df <- getTrajectoriesForCondition(cdm, input$startConditionId)
+    return(df)
+  })
+  
+  startToTargetConditionDF <- eventReactive(trajectoriesData(), {
+    req(trajectoriesData())
     
+    df <- createStartToTargetConditionDF4(trajectoriesData(), input$startConditionId, input$targetConditionId)
+    return(df)
+  })
+  
+  resultPercentages <- reactive({
+    calculateStartToTargetPercentages(startToTargetConditionDF())
+  })
+  
+  output$percentageOfTargetText <- renderText("Chance of target condition from start condition")
+  output$percentageOfTarget1 <- renderText(paste("in 1 year:", resultPercentages()$target_percentage_1y, "%"))
+  output$percentageOfTarget3 <- renderText(paste("in 3 years:", resultPercentages()$target_percentage_3y, "%"))
+  output$percentageOfTarget5 <- renderText(paste("in 5 years:", resultPercentages()$target_percentage_5y, "%"))
+  
+  
+  
+  # Render the trajectories table
+  output$trajectoryTable <- renderDT({
+    req(trajectoriesData())
+    datatable(
+      trajectoriesData(),
+      options = list(pageLength = 10),
+      filter = 'top'
+    )
+  })
+  
+  # Render the start to target condition table
+  output$startToTargetConditionTable <- renderDT({
+    req(startToTargetConditionDF())
+    datatable(
+      startToTargetConditionDF(),
+      options = list(pageLength = 10),
+      filter = 'top'
+    )
+  })
+  
+  # Update the patient selector when trajectories Data changes
+  observeEvent(trajectoriesData(), {
+    updateSelectizeInput(
+      session,
+      "selectedPatient",
+      choices = unique(trajectoriesData()$person_id),
+      server = TRUE
+    )
+  })
+  
+  # Render the patient timeline plot
+  output$patientTimeline <- renderPlot({
+    req(trajectoriesData())
+    req(input$selectedPatient)
+    patientData <- trajectoriesData() %>%
+      filter(person_id == input$selectedPatient)
     
+    ggplot(patientData, aes(x = condition_start_date, y = concept_name)) +
+      geom_point() +
+      labs(
+        title = paste("Condition timeline for Patient", input$selectedPatient),
+        x = "Date",
+        y = "Condition"
+      ) +
+      theme_minimal()
+  })
+  
+  # Render the patient pyramid plots
+  output$patientPyramid1 <- renderPlot({
+    req(trajectoriesData())
+    req(input$startConditionId > 0)
     
-    # Render the trajectories table
-    output$trajectoryTable <- renderDT({
-      req(trajectoriesData())
-      datatable(
-        trajectoriesData(),
-        options = list(pageLength = 10),
-        filter = 'top'
-      )
-    })
+    createPopulationPyramidForCondition(cdm, input$startConditionId)
     
-    # Render the start to target condition table
-    output$startToTargetConditionTable <- renderDT({
-      req(startToTargetConditionDF())
-      datatable(
-        startToTargetConditionDF(),
-        options = list(pageLength = 10),
-        filter = 'top'
-      )
-    })
+  })
+  
+  output$patientPyramid2 <- renderPlot({
+    req(trajectoriesData())
+    req(input$targetConditionId > 0)
     
-    # Update the patient selector when trajectories Data changes
-    observeEvent(trajectoriesData(), {
-      updateSelectizeInput(
-        session,
-        "selectedPatient",
-        choices = unique(trajectoriesData()$person_id),
-        server = TRUE
-      )
-    })
+    createPopulationPyramidForCondition(cdm, input$targetConditionId)
     
-    # Render the patient timeline plot
-    output$patientTimeline <- renderPlot({
-      req(trajectoriesData())
-      req(input$selectedPatient)
-      patientData <- trajectoriesData() %>%
-        filter(person_id == input$selectedPatient)
-      
-      ggplot(patientData, aes(x = condition_start_date, y = concept_name)) +
-        geom_point() +
-        labs(
-          title = paste("Condition timeline for Patient", input$selectedPatient),
-          x = "Date",
-          y = "Condition"
-        ) +
-        theme_minimal()
-    })
-    
-    # Render the patient pyramid plots
-    output$patientPyramid1 <- renderPlot({
-      req(trajectoriesData())
-      req(input$startConditionId > 0)
-
-      createPopulationPyramidForCondition(cdm, input$startConditionId)
-      
-    })
-    
-    output$patientPyramid2 <- renderPlot({
-      req(trajectoriesData())
-      req(input$targetConditionId > 0)
-      
-      createPopulationPyramidForCondition(cdm, input$targetConditionId)
-      
-    })
-    
-    
-    
-    session$onSessionEnded(function() {
-      # disconnect DB
-      CDMConnector::cdmDisconnect(cdm)
-    })
+  })
+  
+  
+  
+  session$onSessionEnded(function() {
+    # disconnect DB
+    CDMConnector::cdmDisconnect(cdm)
+  })
 }
 
 # Run the application 
