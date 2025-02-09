@@ -139,12 +139,13 @@ server <- function(input, output, session) {
   lastStartCondition <- reactiveVal("")
   lastTargetCondition <- reactiveVal("")
   
+  # Fetch all condition concepts for initial choices using getAllConditions function
+  allConditionConcepts <- getAllConditions(cdm)
+  
   # Update choices for selectizeInput
   updateConditionChoices <- function(session, inputId, conceptId = "") {
     print(paste("Updating choices for:", inputId, "with conceptId:", conceptId))
     if (conceptId == "" | is.na(conceptId)) {
-      # Fetch all condition concepts for initial choices using getAllConditions function
-      allConditionConcepts <- getAllConditions(cdm)
       
       choiceList <- setNames(allConditionConcepts$concept_id, allConditionConcepts$concept_name_id)
       updateSelectizeInput(session, inputId, choices = choiceList, server = FALSE,
