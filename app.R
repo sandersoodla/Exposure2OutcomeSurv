@@ -136,6 +136,9 @@ server <- function(input, output, session) {
   
   ######### CONDITION INPUT
   
+  lastStartCondition <- reactiveVal("")
+  lastTargetCondition <- reactiveVal("")
+  
   # Update choices for selectizeInput
   updateConditionChoices <- function(session, inputId, conceptId = "") {
     print(paste("Updating choices for:", inputId, "with conceptId:", conceptId))
@@ -157,7 +160,7 @@ server <- function(input, output, session) {
       choices <- getRelatedConcepts(cdm, conceptId)
       choiceList <- setNames(choices$concept_id, choices$concept_name_id)
       updateSelectizeInput(session, inputId, choices = choiceList, server = FALSE,
-                           #selected = input[[inputId]], # Keep the current selection
+                           selected = conceptId, # Keep the current selection
                            options = list(
                              placeholder = "Type to search related conditions",
                              maxOptions = 10,
@@ -174,28 +177,36 @@ server <- function(input, output, session) {
   updateConditionChoices(session, "targetConditionId", "")
   
   
-  
-  # Reactively update start condition choices based on selection using observeEvent
+  # Observer that updates the input’s choices when the user selects a start condition.
   observeEvent(input$startConditionId, {
-    selectedStartId <- input$startConditionId
-    if (!is.null(selectedStartId) && selectedStartId != "") {
-      updateConditionChoices(session, "startConditionId", selectedStartId) # Update choices to related concepts for *startConditionId*
-    } else {
-      updateConditionChoices(session, "startConditionId", "") # Reset choices when input is cleared
+    # Check if the new value differs from the last updated value.
+    if (identical(input$startConditionId, lastStartCondition())) {
+      return()
     }
+    
+    # Save the new value
+    lastStartCondition(input$startConditionId)
+    
+    # Now update the input’s choices
+    updateConditionChoices(session, "startConditionId", input$startConditionId)
+
   }, ignoreNULL = FALSE, ignoreInit = TRUE)
   
   
-  # Reactively update target condition choices based on selection using observeEvent
+  # Observer that updates the input’s choices when the user selects a target condition.
   observeEvent(input$targetConditionId, {
-    selectedTargetId <- input$targetConditionId
-    if (!is.null(selectedTargetId) && selectedTargetId != "") {
-      updateConditionChoices(session, "targetConditionId", selectedTargetId) # Update choices to related concepts for *targetConditionId*
-    } else {
-      updateConditionChoices(session, "targetConditionId", "") # Reset choices when input is cleared
+    # Check if the new value differs from the last updated value.
+    if (identical(input$targetConditionId, lastTargetCondition())) {
+      return()
     }
+    
+    # Save the new value
+    lastTargetCondition(input$targetConditionId)
+    
+    # Now update the input’s choices
+    updateConditionChoices(session, "targetConditionId", input$targetConditionId)
+    
   }, ignoreNULL = FALSE, ignoreInit = TRUE)
-  
   
   
   
