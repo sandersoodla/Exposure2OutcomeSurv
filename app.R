@@ -32,7 +32,7 @@ ui <- fluidPage(
     sidebarPanel(
       selectizeInput(
         "startConditionId",
-        "Start Condition concept id",
+        "Start Condition concept",
         choices = NULL,
         selected = "",
         multiple = FALSE,
@@ -42,7 +42,7 @@ ui <- fluidPage(
       hr(),
       selectizeInput(
         "targetConditionId",
-        "Target Condition concept id",
+        "Target Condition concept",
         choices = NULL,
         selected = "",
         multiple = FALSE,
@@ -60,10 +60,7 @@ ui <- fluidPage(
     ),
     
     mainPanel(
-      textOutput("percentageOfTargetText"),
-      textOutput("percentageOfTarget1"),
-      textOutput("percentageOfTarget3"),
-      textOutput("percentageOfTarget5"),
+      uiOutput("percentageOutputs"),
       
       tabsetPanel(
         tabPanel("Demographic overview", 
@@ -228,10 +225,18 @@ server <- function(input, output, session) {
     return(df)
   })
   
+  
+  timeframes = c("2 weeks" = 14,
+                 "1 month" = 30,
+                 "6 months" = 6 * 30,
+                 "1 year" = 365,
+                 "3 years" = 3 * 365,
+                 "5 years" = 5 * 365)
+  
   startToTargetConditionDF <- eventReactive(trajectoriesData(), {
     req(trajectoriesData())
     
-    df <- createStartToTargetConditionDF4(trajectoriesData(), input$startConditionId, input$targetConditionId)
+    df <- createStartToTargetConditionDF(trajectoriesData(), input$startConditionId, input$targetConditionId, timeframes)
     return(df)
   })
   
@@ -239,11 +244,29 @@ server <- function(input, output, session) {
     calculateStartToTargetPercentages(startToTargetConditionDF())
   })
   
-  output$percentageOfTargetText <- renderText("Chance of target condition from start condition")
-  output$percentageOfTarget1 <- renderText(paste("in 1 year:", resultPercentages()$target_percentage_1y, "%"))
-  output$percentageOfTarget3 <- renderText(paste("in 3 years:", resultPercentages()$target_percentage_3y, "%"))
-  output$percentageOfTarget5 <- renderText(paste("in 5 years:", resultPercentages()$target_percentage_5y, "%"))
-  
+  # Percentage data
+  output$percentageOutputs <- renderUI({
+    req(resultPercentages())
+    percentages <- resultPercentages()
+    
+    # Dynamically create UI elements for each percentage
+    percentage_cols <- names(percentages)[grepl("^target_condition_in_", names(percentages))]
+    
+    # Generate labels based on column names
+    time_labels <- sub("^target_condition_in_", "in ", percentage_cols)
+    time_labels <- paste0(time_labels, ":")
+    
+    # Create output elements for each percentage
+    percentage_outputs <- lapply(seq_along(percentage_cols), function(i) {
+      column(width = 2,
+             h4(time_labels[i]),
+             p(paste0(sprintf("%.1f", percentages[[percentage_cols[i]]]), "%")) # Format to one decimal place
+      )
+    })
+    
+    # Wrap in a fluidRow for horizontal layout
+    fluidRow(percentage_outputs)
+  })
   
   
   # Render the trajectories table
