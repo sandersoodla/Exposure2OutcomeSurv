@@ -244,28 +244,54 @@ server <- function(input, output, session) {
     calculateStartToTargetPercentages(startToTargetConditionDF())
   })
   
+  resultAbsolute <- reactive({
+    req(startToTargetConditionDF())
+    
+    df <- startToTargetConditionDF()
+    # Calculate the counts of TRUE values for each target_condition_in_* column
+    absoluteCounts <- sapply(df %>% select(starts_with("target_condition_in_")), function(x) sum(x))
+    # Calculate the total number of rows (start condition occurrences)
+    totalCounts <- sapply(df %>% select(starts_with("target_condition_in_")), function(x) length(x))
+    
+    #Combine the counts of TRUE and ALL
+    resultDf <- data.frame(
+      true_counts = absoluteCounts,
+      total = totalCounts
+    )
+    
+    return(resultDf)
+  })
+  
   # Percentage data
   output$percentageOutputs <- renderUI({
     req(resultPercentages())
+    req(resultAbsolute())
+    
     percentages <- resultPercentages()
+    absoluteCountsDf <- resultAbsolute()
     
     # Dynamically create UI elements for each percentage
-    percentage_cols <- names(percentages)[grepl("^target_condition_in_", names(percentages))]
+    percentageCols <- names(percentages)[grepl("^target_condition_in_", names(percentages))]
     
     # Generate labels based on column names
-    time_labels <- sub("^target_condition_in_", "in ", percentage_cols)
-    time_labels <- paste0(time_labels, ":")
+    timeLabels <- sub("^target_condition_in_", "in ", percentageCols)
+    timeLabels <- paste0(timeLabels, ":")
     
-    # Create output elements for each percentage
-    percentage_outputs <- lapply(seq_along(percentage_cols), function(i) {
+    # Create output elements for each percentage and absolute count
+    outputElements <- lapply(seq_along(percentageCols), function(i) {
+      colName <- percentageCols[i]
+      trueCount <- absoluteCountsDf[colName, "true_counts"]
+      totalCount <- absoluteCountsDf[colName, "total"]
+      
       column(width = 2,
-             h4(time_labels[i]),
-             p(paste0(sprintf("%.1f", percentages[[percentage_cols[i]]]), "%")) # Format to one decimal place
+             h4(timeLabels[i]),
+             p(paste0(sprintf("%.1f", percentages[[colName]]), "% (", trueCount, "/", totalCount, ")"))
       )
     })
     
+    
     # Wrap in a fluidRow for horizontal layout
-    fluidRow(percentage_outputs)
+    fluidRow(outputElements)
   })
   
   
