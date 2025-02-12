@@ -65,14 +65,14 @@ createStartToTargetConditionDF <- function(trajectories,
   # Join start and target conditions on person_id
   # For each start condition, find the earliest target condition after it
   start_target_combinations <- start_conditions %>%
-    inner_join(target_conditions, by = "person_id", suffix = c("_start", "_target"), relationship = "many-to-many") %>%
-    filter(condition_start_date_target >= condition_start_date_start) %>%
+    left_join(target_conditions, by = "person_id", suffix = c("_start", "_target"), relationship = "many-to-many") %>%
+    filter(is.na(condition_start_date_target) | condition_start_date_target >= condition_start_date_start) %>%
     mutate(time_diff_days = as.numeric(difftime(condition_start_date_target, condition_start_date_start, units = "days")))
   
   # Find the minimum time difference for each start condition occurrence
   min_time_diffs <- start_target_combinations %>%
     group_by(person_id, start_condition_nr) %>%
-    summarize(min_time_diff_days = min(time_diff_days), .groups = "drop")
+    summarize(min_time_diff_days = if(any(!is.na(time_diff_days))) min(time_diff_days, na.rm = TRUE) else NA, .groups = "drop")
   
   # Merge back to start conditions
   start_conditions <- start_conditions %>%
@@ -108,6 +108,7 @@ calculateStartToTargetPercentages <- function(start_to_target_condition) {
 
 
 ############### UNTESTED, BUT MAY BE FASTER
+############### USES OLD LOGIC WHICH WAS NOT CORRECT
 
 library(data.table)
 
