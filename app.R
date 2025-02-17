@@ -11,6 +11,7 @@ library(shiny)
 library(bslib)
 library(DT)
 library(ggplot2)
+library(networkD3)
 
 # Define UI for application 
 ui <- fluidPage(
@@ -63,14 +64,29 @@ ui <- fluidPage(
       uiOutput("percentageOutputs"),
       
       tabsetPanel(
+        tabPanel("Sankey",
+            sankeyNetworkOutput("sankeyPlot"),
+            div(style = "min-height: 300px",
+                selectizeInput(
+                   "hiddenConditions",
+                   "Conditions to hide in Sankey Plot:",
+                   choices = NULL,
+                   multiple = TRUE,
+                   selected = NULL,
+                   options = list(
+                     plugins = list("remove_button"),
+                     placeholder = "Select conditions to hide")
+                 )
+              )
+            ),
         tabPanel("Demographic overview", 
                  fluidRow(
                    column(6, plotOutput("patientPyramid1")),
                    column(6, plotOutput("patientPyramid2"))
                  ),
         ),
-        tabPanel("Trajectories containing start condition", DTOutput("trajectoryTable")),
         tabPanel("Patient Timeline", plotOutput("patientTimeline")),
+        tabPanel("Trajectories containing start condition", DTOutput("trajectoryTable")),
         tabPanel("Start to target", DTOutput("startToTargetConditionTable"))
       ),
       width = 9
@@ -121,7 +137,7 @@ server <- function(input, output, session) {
   
   
   
-  ############################# OUTPUTS ##############
+  ### OUTPUTS ##############
   
   
   # METADATA
@@ -225,6 +241,25 @@ server <- function(input, output, session) {
     return(df)
   })
   
+  # Trajectories filtered to observe from start condition onwards
+  trajectoriesDataFromStartCondition <- eventReactive(trajectoriesData(), {
+    req(trajectoriesData())
+    
+    trajectories <- trajectoriesData()
+    
+    # Compute the first date the start condition appears for each person
+    firstOccurrence <- trajectories %>%
+      filter(concept_id == input$startConditionId) %>%
+      group_by(person_id) %>%
+      summarise(first_date = min(condition_start_date), .groups = "drop")
+    
+    # Only keep trajectories from that first date onward
+    filteredTrajectories <- trajectories %>%
+      inner_join(firstOccurrence, by = "person_id") %>%
+      filter(condition_start_date >= first_date)
+    
+    return(filteredTrajectories)
+  })
   
   timeframes = c("2 weeks" = 14,
                  "1 month" = 30,
@@ -315,15 +350,121 @@ server <- function(input, output, session) {
     )
   })
   
-  # Update the patient selector when trajectories Data changes
+  
+  # Reactive value to store hidden conditions
+  hiddenConditionList <- reactiveVal(NULL)
+  
+  # Update the patient selector and hidden condition options when trajectories Data changes
   observeEvent(trajectoriesData(), {
+    currentHidden <- hiddenConditionList()
+    availableConditions <- unique(trajectoriesData()$concept_name)
+    validHidden <- intersect(currentHidden, availableConditions) # Keep only valid hidden conditions
+    
     updateSelectizeInput(
       session,
       "selectedPatient",
       choices = unique(trajectoriesData()$person_id),
       server = TRUE
     )
+    updateSelectizeInput(
+      session,
+      "hiddenConditions",
+      choices = availableConditions,
+      selected = validHidden,
+      server = TRUE
+    )
+    # Update reactive value
+    hiddenConditionList(validHidden)
   })
+  
+  
+  # Observer to update hiddenConditionList when input$hiddenConditions changes
+  observeEvent(input$hiddenConditions, {
+    hiddenConditionList(input$hiddenConditions)
+  }, ignoreNULL = FALSE)
+  
+  
+  ################# SANKEY PLOT #
+  
+  createSankeyLinks <- function(trajectoriesDf, hiddenConditions = NULL) {
+    linksList <- list()
+    personIds <- unique(trajectoriesDf$person_id)
+    
+    for (personId in personIds) {
+      personTrajectory <- trajectoriesDf %>%
+        filter(person_id == !!personId) %>%
+        arrange(condition_start_date) # Ensure chronological order
+      
+      if (nrow(personTrajectory) > 1) {
+        for (i in 1:(nrow(personTrajectory) - 1)) {
+          sourceCondition <- personTrajectory$concept_name[i]
+          targetCondition <- personTrajectory$concept_name[i + 1]
+          
+          # Skip if either source or target condition is in hiddenConditions
+          if (!(sourceCondition %in% hiddenConditions) && !(targetCondition %in% hiddenConditions)) {
+            linksList[[length(linksList) + 1]] <- data.frame(
+              source = sourceCondition,
+              target = targetCondition
+            )
+          }
+        }
+      }
+    }
+    linksDf <- bind_rows(linksList)
+    
+    # Aggregate links to count transitions
+    aggregatedLinks <- linksDf %>%
+      group_by(source, target) %>%
+      summarise(value = n(), .groups = 'drop') %>%
+      ungroup()
+    
+    return(aggregatedLinks)
+  }
+  
+  
+  output$sankeyPlot <- renderSankeyNetwork({
+    req(trajectoriesDataFromStartCondition())
+    
+    trajectories <- trajectoriesDataFromStartCondition()
+    
+    hiddenConditions <- hiddenConditionList() # Get selected hidden conditions
+    
+    # Create Sankey Links, passing hidden conditions
+    sankeyLinksData <- createSankeyLinks(trajectories, hiddenConditions)
+    
+    # Create Nodes data frame
+    sankeyNodesData <- data.frame(
+      name = unique(c(sankeyLinksData$source, sankeyLinksData$target))
+    )
+    
+    # Prepare Links for networkD3
+    linksForNetworkD3 <- sankeyLinksData %>%
+      left_join(sankeyNodesData %>% mutate(Id = 0:(n()-1)), by = c("source" = "name")) %>%
+      rename(sourceId = Id) %>%
+      left_join(sankeyNodesData %>% mutate(Id = 0:(n()-1)), by = c("target" = "name")) %>%
+      rename(targetId = Id) %>%
+      select(source = sourceId, target = targetId, value, sourceName = source, targetName = target)
+    
+    data <- list(links = linksForNetworkD3, nodes = sankeyNodesData) # Get both links and nodes
+    
+    # Generate sankey plot
+    sankeyNetwork(
+      Links = data$links,
+      Nodes = data$nodes,
+      Source = "source",
+      Target = "target",
+      Value = "value",
+      NodeID = "name",
+      units = "occurrences",
+      fontSize = 12,
+      nodeWidth = 30,
+      nodePadding = 15,
+      sinksRight = FALSE, # Adjust layout if needed
+      width = "100%",  # Make plot responsive
+      height = "1000px"
+    )
+  })
+  
   
   # Render the patient timeline plot
   output$patientTimeline <- renderPlot({
