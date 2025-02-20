@@ -64,21 +64,36 @@ ui <- fluidPage(
       uiOutput("percentageOutputs"),
       
       tabsetPanel(
-        tabPanel("Sankey",
-            sankeyNetworkOutput("sankeyPlot"),
-            div(style = "min-height: 300px",
-                selectizeInput(
-                   "hiddenConditions",
-                   "Conditions to hide in Sankey Plot:",
-                   choices = NULL,
-                   multiple = TRUE,
-                   selected = NULL,
-                   options = list(
-                     plugins = list("remove_button"),
-                     placeholder = "Select conditions to hide")
+        tabPanel("Conditions Sankey",
+                 sankeyNetworkOutput("sankeyPlotCondition"),
+                 div(style = "min-height: 300px",
+                     selectizeInput(
+                       "hiddenConditions",
+                       "Conditions to hide in Sankey Plot:",
+                       choices = NULL,
+                       multiple = TRUE,
+                       selected = NULL,
+                       options = list(
+                         plugins = list("remove_button"),
+                         placeholder = "Select conditions to hide")
+                     )
                  )
-              )
-            ),
+        ),
+        tabPanel("Procedures Sankey",
+                 sankeyNetworkOutput("sankeyPlotProcedure"),
+                 div(style = "min-height: 300px",
+                     selectizeInput(
+                       "hiddenProcedures",
+                       "Procedures to hide in Sankey Plot:",
+                       choices = NULL,
+                       multiple = TRUE,
+                       selected = NULL,
+                       options = list(
+                         plugins = list("remove_button"),
+                         placeholder = "Select procedures to hide")
+                     )
+                 )
+        ),
         tabPanel("Demographic overview", 
                  fluidRow(
                    column(6, plotOutput("patientPyramid1")),
@@ -103,6 +118,7 @@ source("scripts/conditionToCondition.R")
 source("scripts/demographicAnalysis.R")
 source("scripts/getMetadata.R")
 source("scripts/conceptRelations.R")
+source("scripts/getProcedures.R")
 
 
 
@@ -384,27 +400,64 @@ server <- function(input, output, session) {
   }, ignoreNULL = FALSE)
   
   
-  ################# SANKEY PLOT #
   
-  createSankeyLinks <- function(trajectoriesDf, hiddenConditions = NULL) {
+  ################# PROCEDURE DATA ###################
+  
+  # Reactive expression to fetch procedure data
+  proceduresData <- eventReactive(input$getData, {
+    req(input$startConditionId > 0)
+    df_procedure <- getProceduresAfterStartCondition(cdm, input$startConditionId)
+    return(df_procedure)
+  })
+  
+  # Reactive value to store hidden procedures
+  hiddenProcedureList <- reactiveVal(NULL)
+  
+  # Update hidden procedure options when procedure data changes
+  observeEvent(proceduresData(), {
+    currentHiddenProcedures <- hiddenProcedureList()
+    availableProcedures <- unique(proceduresData()$concept_name)
+    validHiddenProcedures <- intersect(currentHiddenProcedures, availableProcedures) # Keep only valid hidden procedures
+    
+    updateSelectizeInput(
+      session,
+      "hiddenProcedures",
+      choices = availableProcedures,
+      selected = validHiddenProcedures,
+      server = TRUE
+    )
+    # Update reactive value
+    hiddenProcedureList(validHiddenProcedures)
+  })
+  
+  
+  # Observer to update hiddenProcedureList when input$hiddenProcedures changes
+  observeEvent(input$hiddenProcedures, {
+    hiddenProcedureList(input$hiddenProcedures)
+  }, ignoreNULL = FALSE)
+  
+  
+  
+  ################# SANKEY PLOT CONDITION #
+  
+  createSankeyLinks <- function(trajectoryDf, hiddenItems = NULL) {
     linksList <- list()
-    personIds <- unique(trajectoriesDf$person_id)
+    personIds <- unique(trajectoryDf$person_id)
     
     for (personId in personIds) {
-      personTrajectory <- trajectoriesDf %>%
-        filter(person_id == !!personId) %>%
-        arrange(condition_start_date) # Ensure chronological order
+      personTrajectory <- trajectoryDf %>%
+        filter(person_id == !!personId)
       
       if (nrow(personTrajectory) > 1) {
         for (i in 1:(nrow(personTrajectory) - 1)) {
-          sourceCondition <- personTrajectory$concept_name[i]
-          targetCondition <- personTrajectory$concept_name[i + 1]
+          sourceEvent <- personTrajectory$concept_name[i]
+          targetEvent <- personTrajectory$concept_name[i + 1]
           
-          # Skip if either source or target condition is in hiddenConditions
-          if (!(sourceCondition %in% hiddenConditions) && !(targetCondition %in% hiddenConditions)) {
+          # Skip if either source or target event is in hiddenItems
+          if (!(sourceEvent %in% hiddenItems) && !(targetEvent %in% hiddenItems)) {
             linksList[[length(linksList) + 1]] <- data.frame(
-              source = sourceCondition,
-              target = targetCondition
+              source = sourceEvent,
+              target = targetEvent
             )
           }
         }
@@ -422,7 +475,7 @@ server <- function(input, output, session) {
   }
   
   
-  output$sankeyPlot <- renderSankeyNetwork({
+  output$sankeyPlotCondition <- renderSankeyNetwork({
     req(trajectoriesDataFromStartCondition())
     
     trajectories <- trajectoriesDataFromStartCondition()
@@ -445,7 +498,8 @@ server <- function(input, output, session) {
       rename(targetId = Id) %>%
       select(source = sourceId, target = targetId, value, sourceName = source, targetName = target)
     
-    data <- list(links = linksForNetworkD3, nodes = sankeyNodesData) # Get both links and nodes
+    # Get both links and nodes
+    data <- list(links = linksForNetworkD3, nodes = sankeyNodesData)
     
     # Generate sankey plot
     sankeyNetwork(
@@ -459,11 +513,63 @@ server <- function(input, output, session) {
       fontSize = 12,
       nodeWidth = 30,
       nodePadding = 15,
-      sinksRight = FALSE, # Adjust layout if needed
-      width = "100%",  # Make plot responsive
+      sinksRight = FALSE,
+      width = "100%",
       height = "1000px"
     )
   })
+  
+  
+  ################ SANKEY PLOT PROCEDURE #
+  
+  
+  output$sankeyPlotProcedure <- renderSankeyNetwork({
+    req(proceduresData())
+    
+    procedures <- proceduresData()
+    
+    hiddenProcedures <- hiddenProcedureList() # Get selected hidden procedures
+    
+    # Create Sankey Links, passing hidden procedures
+    sankeyLinksDataProcedure <- createSankeyLinks(procedures, hiddenProcedures)
+    
+    # Create Nodes data frame
+    sankeyNodesDataProcedure <- data.frame(
+      name = unique(c(sankeyLinksDataProcedure$source, sankeyLinksDataProcedure$target))
+    )
+    
+    # Prepare Links for networkD3
+    linksForNetworkD3Procedure <- sankeyLinksDataProcedure %>%
+      left_join(sankeyNodesDataProcedure %>% mutate(Id = 0:(n()-1)), by = c("source" = "name")) %>%
+      rename(sourceId = Id) %>%
+      left_join(sankeyNodesDataProcedure %>% mutate(Id = 0:(n()-1)), by = c("target" = "name")) %>%
+      rename(targetId = Id) %>%
+      select(source = sourceId, target = targetId, value, sourceName = source, targetName = target)
+    
+    # Get both links and nodes
+    dataProcedure <- list(links = linksForNetworkD3Procedure, nodes = sankeyNodesDataProcedure)
+    
+    # Generate sankey plot
+    sankeyNetwork(
+      Links = dataProcedure$links,
+      Nodes = dataProcedure$nodes,
+      Source = "source",
+      Target = "target",
+      Value = "value",
+      NodeID = "name",
+      units = "occurrences",
+      fontSize = 12,
+      nodeWidth = 30,
+      nodePadding = 15,
+      sinksRight = FALSE,
+      width = "100%",
+      height = "1000px"
+    )
+  })
+  
+  
+  
+  ########### PATIENT TIMELINE AND PYRAMIDS
   
   
   # Render the patient timeline plot
