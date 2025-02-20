@@ -1,9 +1,9 @@
 
-
-getProceduresAfterStartCondition <- function(cdm, startConditionId) {
+# Note: after FIRST condition occurrence of start condition
+getProceduresAfterStartCondition <- function(cdm, startConditionIds) {
   # Get the first occurrence date of the start condition for each patient
   firstOccurrence <- cdm$condition_occurrence %>%
-    filter(condition_concept_id == startConditionId) %>%
+    filter(condition_concept_id %in% startConditionIds) %>%
     group_by(person_id) %>%
     summarise(start_date = min(condition_start_date), .groups = "drop")
   

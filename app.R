@@ -35,9 +35,11 @@ ui <- fluidPage(
         "startConditionId",
         "Start Condition concept",
         choices = NULL,
-        selected = "",
-        multiple = FALSE,
-        options = list(placeholder = "Type to search conditions")
+        selected = character(0),
+        multiple = TRUE,
+        options = list(
+          plugins = list("remove_button"),
+          placeholder = "Type to search conditions")
       ),
       textOutput("startConditionText"),
       hr(),
@@ -45,9 +47,11 @@ ui <- fluidPage(
         "targetConditionId",
         "Target Condition concept",
         choices = NULL,
-        selected = "",
-        multiple = FALSE,
-        options = list(placeholder = "Type to search conditions")
+        selected = character(0),
+        multiple = TRUE,
+        options = list(
+          plugins = list("remove_button"),
+          placeholder = "Type to search conditions")
       ),
       textOutput("targetConditionText"),
       actionButton("getData", "Get stats"),
@@ -165,16 +169,16 @@ server <- function(input, output, session) {
   
   ######### CONDITION INPUT
   
-  lastStartCondition <- reactiveVal("")
-  lastTargetCondition <- reactiveVal("")
+  lastStartCondition <- reactiveVal(character(0))
+  lastTargetCondition <- reactiveVal(character(0))
   
   # Fetch all condition concepts for initial choices using getAllConditions function
   allConditionConcepts <- getAllConditions(cdm)
   
   # Update choices for selectizeInput
-  updateConditionChoices <- function(session, inputId, conceptId = "") {
+  updateConditionChoices <- function(session, inputId, conceptId = character(0)) {
     print(paste("Updating choices for:", inputId, "with conceptId:", conceptId))
-    if (conceptId == "" | is.na(conceptId)) {
+    if (length(conceptId) == 0 | all(is.na(conceptId))) {
       
       choiceList <- setNames(allConditionConcepts$concept_id, allConditionConcepts$concept_name_id)
       updateSelectizeInput(session, inputId, choices = choiceList, server = FALSE,
@@ -187,8 +191,9 @@ server <- function(input, output, session) {
       
     } else {
       # Fetch related concepts for dynamic update
-      choices <- getRelatedConcepts(cdm, conceptId)
-      choiceList <- setNames(choices$concept_id, choices$concept_name_id)
+      choiceList <- setNames(allConditionConcepts$concept_id, allConditionConcepts$concept_name_id)
+      #choices <- getRelatedConcepts(cdm, conceptId)
+      #choiceList <- setNames(choices$concept_id, choices$concept_name_id)
       updateSelectizeInput(session, inputId, choices = choiceList, server = FALSE,
                            selected = conceptId, # Keep the current selection
                            options = list(
@@ -201,10 +206,10 @@ server <- function(input, output, session) {
   
   
   ## Initialize start condition choices
-  updateConditionChoices(session, "startConditionId", "")
+  updateConditionChoices(session, "startConditionId")
   
   ## Initialize target condition choices
-  updateConditionChoices(session, "targetConditionId", "")
+  updateConditionChoices(session, "targetConditionId")
   
   
   # Observer that updates the input’s choices when the user selects a start condition.
@@ -250,8 +255,8 @@ server <- function(input, output, session) {
   
   # Reactive expression to fetch data when the button is clicked
   trajectoriesData <- eventReactive(input$getData, {
-    req(input$startConditionId > 0)
-    req(input$targetConditionId > 0)
+    req(length(input$startConditionId) > 0)
+    req(length(input$targetConditionId) > 0)
     
     df <- getTrajectoriesForCondition(cdm, input$startConditionId)
     return(df)
@@ -265,7 +270,7 @@ server <- function(input, output, session) {
     
     # Compute the first date the start condition appears for each person
     firstOccurrence <- trajectories %>%
-      filter(concept_id == input$startConditionId) %>%
+      filter(concept_id %in% input$startConditionId) %>%
       group_by(person_id) %>%
       summarise(first_date = min(condition_start_date), .groups = "drop")
     
@@ -405,7 +410,8 @@ server <- function(input, output, session) {
   
   # Reactive expression to fetch procedure data
   proceduresData <- eventReactive(input$getData, {
-    req(input$startConditionId > 0)
+    req(length(input$startConditionId) > 0)
+    
     df_procedure <- getProceduresAfterStartCondition(cdm, input$startConditionId)
     return(df_procedure)
   })
