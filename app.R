@@ -354,7 +354,7 @@ server <- function(input, output, session) {
       options = list(pageLength = 10),
       filter = 'top'
     )
-  })
+  }, server = TRUE)
   
   # Render the start to target condition table
   output$startToTargetConditionTable <- renderDT({
@@ -364,7 +364,7 @@ server <- function(input, output, session) {
       options = list(pageLength = 10),
       filter = 'top'
     )
-  })
+  }, server = TRUE)
   
   
   # Reactive value to store hidden conditions
