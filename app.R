@@ -12,6 +12,9 @@ library(bslib)
 library(DT)
 library(ggplot2)
 library(networkD3)
+library(survival)
+library(survminer)
+library(dplyr)
 
 # Define UI for application 
 ui <- fluidPage(
@@ -68,6 +71,7 @@ ui <- fluidPage(
       uiOutput("percentageOutputs"),
       
       tabsetPanel(
+        tabPanel("Start to Target KM", uiOutput("kmPlotsUI")),
         tabPanel("Conditions Sankey",
                  sankeyNetworkOutput("sankeyPlotCondition"),
                  div(style = "min-height: 300px",
@@ -169,9 +173,6 @@ server <- function(input, output, session) {
   
   ######### CONDITION INPUT
   
-  lastStartCondition <- reactiveVal(character(0))
-  lastTargetCondition <- reactiveVal(character(0))
-  
   # Fetch all condition concepts for initial choices using getAllConditions function
   allConditionConcepts <- getAllConditions(cdm)
   
@@ -181,8 +182,7 @@ server <- function(input, output, session) {
     if (length(conceptId) == 0 | all(is.na(conceptId))) {
       
       choiceList <- setNames(allConditionConcepts$concept_id, allConditionConcepts$concept_name_id)
-      updateSelectizeInput(session, inputId, choices = choiceList, server = FALSE,
-                           selected = "",
+      updateSelectizeInput(session, inputId, choices = choiceList, server = TRUE,
                            options = list(
                              placeholder = "Type to search conditions",
                              maxOptions = 10,
@@ -190,12 +190,11 @@ server <- function(input, output, session) {
                            ))
       
     } else {
-      # Fetch related concepts for dynamic update
+      # Fetch related concepts for dynamic update, currently does the same as the other branch
       choiceList <- setNames(allConditionConcepts$concept_id, allConditionConcepts$concept_name_id)
       #choices <- getRelatedConcepts(cdm, conceptId)
       #choiceList <- setNames(choices$concept_id, choices$concept_name_id)
-      updateSelectizeInput(session, inputId, choices = choiceList, server = FALSE,
-                           selected = conceptId, # Keep the current selection
+      updateSelectizeInput(session, inputId, choices = choiceList, server = TRUE,
                            options = list(
                              placeholder = "Type to search related conditions",
                              maxOptions = 10,
@@ -210,38 +209,6 @@ server <- function(input, output, session) {
   
   ## Initialize target condition choices
   updateConditionChoices(session, "targetConditionId")
-  
-  
-  # Observer that updates the input’s choices when the user selects a start condition.
-  observeEvent(input$startConditionId, {
-    # Check if the new value differs from the last updated value.
-    if (identical(input$startConditionId, lastStartCondition())) {
-      return()
-    }
-    
-    # Save the new value
-    lastStartCondition(input$startConditionId)
-    
-    # Now update the input’s choices
-    updateConditionChoices(session, "startConditionId", input$startConditionId)
-
-  }, ignoreNULL = FALSE, ignoreInit = TRUE)
-  
-  
-  # Observer that updates the input’s choices when the user selects a target condition.
-  observeEvent(input$targetConditionId, {
-    # Check if the new value differs from the last updated value.
-    if (identical(input$targetConditionId, lastTargetCondition())) {
-      return()
-    }
-    
-    # Save the new value
-    lastTargetCondition(input$targetConditionId)
-    
-    # Now update the input’s choices
-    updateConditionChoices(session, "targetConditionId", input$targetConditionId)
-    
-  }, ignoreNULL = FALSE, ignoreInit = TRUE)
   
   
   
@@ -259,6 +226,15 @@ server <- function(input, output, session) {
     req(length(input$targetConditionId) > 0)
     
     df <- getTrajectoriesForCondition(cdm, input$startConditionId)
+    return(df)
+  })
+  
+  # For KM analysis events for both start and target conditions are needed
+  kmTrajectoriesData <- eventReactive(input$getData, {
+    req(length(input$startConditionId) > 0)
+    req(length(input$targetConditionId) > 0)
+    unionIds <- union(input$startConditionId, input$targetConditionId)
+    df <- getTrajectoriesForCondition(cdm, unionIds)
     return(df)
   })
   
@@ -403,6 +379,113 @@ server <- function(input, output, session) {
   observeEvent(input$hiddenConditions, {
     hiddenConditionList(input$hiddenConditions)
   }, ignoreNULL = FALSE)
+  
+  
+  
+  
+  #################### KM PLOTS FOR DEFINED TARGET OUTCOMES ####################
+  
+  # Build survival data for each target condition.
+  kmSurvivalData <- eventReactive(input$getData, {
+    req(kmTrajectoriesData())
+    req(length(input$startConditionId) > 0, length(input$targetConditionId) > 0)
+    traj <- kmTrajectoriesData()
+    
+    survivalList <- lapply(input$targetConditionId, function(target) {
+      # Start events: those with a start condition.
+      trajStart <- traj %>% filter(concept_id %in% input$startConditionId)
+      # Target events: events matching the target condition.
+      trajTarget <- traj %>% filter(concept_id == target)
+      survivalDf <- trajStart %>%
+        rowwise() %>%
+        mutate(
+          targetDate = {
+            possibleTargets <- trajTarget$condition_start_date[
+              trajTarget$person_id == person_id &
+                trajTarget$condition_start_date > condition_start_date
+            ]
+            if (length(possibleTargets) > 0) min(possibleTargets) else as.Date(NA)
+          }
+        ) %>%
+        ungroup()
+      censorDate <- max(traj$condition_start_date, na.rm = TRUE)
+      survivalDf <- survivalDf %>%
+        mutate(
+          event = ifelse(!is.na(targetDate), 1, 0),
+          finalDate = as.Date(ifelse(event == 1, as.character(targetDate), as.character(censorDate))),
+          timeToEvent = as.numeric(finalDate - condition_start_date)
+        )
+      survivalDf
+    })
+    
+    # Name the list elements using target condition names.
+    targetNames <- sapply(input$targetConditionId, function(id) {
+      nm <- allConditionConcepts$concept_name_id[allConditionConcepts$concept_id == id]
+      if (length(nm) == 0) id else nm
+    })
+    names(survivalList) <- targetNames
+    survivalList
+  })
+  
+  # Create KM plots for each target outcome.
+  kmPlots <- reactive({
+    req(kmSurvivalData())
+    survivalList <- kmSurvivalData()
+    plots <- lapply(names(survivalList), function(targetName) {
+      survData <- survivalList[[targetName]]
+      kmFit <- survfit(Surv(timeToEvent, event) ~ concept_name, data = survData)
+      p <- ggsurvplot(
+        kmFit,
+        data = survData,
+        conf.int = TRUE,
+        pval = TRUE,
+        risk.table = TRUE,
+        legend.title = "Start Condition",
+        title = paste("KM Curves for Outcome:", targetName),
+        xlab = "Days from Start Condition",
+        ylab = "Outcome-free probability"
+      )$plot
+      p
+    })
+    plots
+  })
+  
+  # Render the KM plots in a grid layout (two columns per row).
+  output$kmPlotsUI <- renderUI({
+    req(kmPlots())
+    plots <- kmPlots()
+    numPlots <- length(plots)
+    colsPerRow <- 2
+    numRows <- ceiling(numPlots / colsPerRow)
+    plotTags <- list()
+    index <- 1
+    for (r in 1:numRows) {
+      rowPlots <- list()
+      for (c in 1:colsPerRow) {
+        if (index <= numPlots) {
+          rowPlots[[c]] <- column(width = 6, plotOutput(outputId = paste0("kmPlot_", index)))
+          index <- index + 1
+        }
+      }
+      plotTags[[r]] <- fluidRow(rowPlots)
+    }
+    do.call(tagList, plotTags)
+  })
+  
+  # Render each KM plot output.
+  observe({
+    req(kmPlots())
+    for (i in seq_along(kmPlots())) {
+      local({
+        ii <- i
+        outputId <- paste0("kmPlot_", ii)
+        output[[outputId]] <- renderPlot({
+          kmPlots()[[ii]]
+        })
+      })
+    }
+  })
+  
   
   
   

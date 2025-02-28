@@ -8,7 +8,7 @@ library(data.table)
 getTrajectoriesForCondition <- function(cdm, conditionConceptIDs) {
   
   trajectories <- cdm$condition_occurrence %>%
-    # Keep only rows for persons who have the conditionConceptID
+    # Keep only rows for persons who have at least one of the conditionConceptIDs
     semi_join(
       cdm$condition_occurrence %>%
         filter(condition_concept_id %in% conditionConceptIDs) %>%
