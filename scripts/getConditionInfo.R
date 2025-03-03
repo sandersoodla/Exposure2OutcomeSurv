@@ -41,3 +41,16 @@ getAllConditions <- function(cdm) {
   
   return(allConditionConcepts)
 }
+
+
+getAllConditionsWithOccurrences <- function(cdm) {
+  allConditionConcepts <- cdm$condition_occurrence %>%
+    distinct(condition_concept_id) %>%
+    inner_join(cdm$concept, by = c("condition_concept_id" = "concept_id"), keep = TRUE) %>%
+    filter(domain_id == 'Condition') %>%
+    select(concept_id, concept_name) %>%
+    collect() %>%
+    mutate(concept_name_id = paste(concept_name, " (", concept_id, ")"))
+  
+  return(allConditionConcepts)
+}

@@ -58,8 +58,8 @@ server <- function(input, output, session) {
   
   ######### CONDITION INPUT
   
-  # Fetch all condition concepts for initial choices using getAllConditions function
-  allConditionConcepts <- getAllConditions(cdm)
+  # Fetch all condition concepts that have at least 1 occurrence for initial choices
+  allConditionConcepts <- getAllConditionsWithOccurrences(cdm)
   
   # Update choices for selectizeInput
   updateConditionChoices <- function(session, inputId, conceptId = character(0)) {
