@@ -135,6 +135,7 @@ server <- function(input, output, session) {
   
   #################### CONNECTION SETUP ###########
   
+  DBMS <- Sys.getenv("DBMS")
   DATABASE <- paste(Sys.getenv("DB_HOST"),"/",Sys.getenv("DB_NAME"),sep='')
   DB_USER <- Sys.getenv('DB_USERNAME')
   DB_PASSWORD <- Sys.getenv('DB_PASSWORD')
@@ -143,21 +144,22 @@ server <- function(input, output, session) {
   CDM_SCHEMA <- Sys.getenv("CDM_SCHEMA")
   WRITE_SCHEMA <- Sys.getenv("WRITE_SCHEMA")
   
-  #connectionDetails <- DatabaseConnector::createConnectionDetails(
-  #  dbms = "your_dbms",
-  #  server = "your_server_address",
-  #  user = "your_username",
-  #  password = "your_password",
-  #  schema = "your_cdm_schema",
-  #  port = 1
-  #)
   
-  #connectionDetails <- DatabaseConnector::createConnectionDetails(dbms = "duckdb", server = "c:/temp/EunomiaData/GiBleed_5.3.duckdb")
-  #connection <- DatabaseConnector::connect(connectionDetails)
-  
-  connection <- DBI::dbConnect(duckdb::duckdb(), dbdir = "c:/temp/EunomiaData/GiBleed_5.3.duckdb")
-  
-  cdm <- CDMConnector::cdmFromCon(connection, cdmSchema = CDM_SCHEMA, writeSchema = WRITE_SCHEMA)
+  if (DBMS == "postgresql") {
+    connectionDetails <- DatabaseConnector::createConnectionDetails(
+      dbms = DBMS,
+      server = DATABASE,
+      user = DB_USER,
+      password = DB_PASSWORD,
+      port = 5432
+    )
+    connection <- DatabaseConnector::connect(connectionDetails)
+    cdm <- CDMConnector::cdmFromCon(connection, cdmSchema = CDM_SCHEMA, writeSchema = WRITE_SCHEMA, cdmName = "maitt_cdm")
+    
+  } else if (DBMS == "duckdb") {
+    connection <- DBI::dbConnect(duckdb::duckdb(), dbdir = "c:/temp/EunomiaData/GiBleed_5.3.duckdb")
+    cdm <- CDMConnector::cdmFromCon(connection, cdmSchema = CDM_SCHEMA, writeSchema = WRITE_SCHEMA)
+  }
   
   
   
