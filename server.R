@@ -28,7 +28,7 @@ server <- function(input, output, session) {
   WRITE_SCHEMA <- Sys.getenv("WRITE_SCHEMA")
   
   
-  if (DBMS == "postgresql") {
+  if (DBMS == "postgresql") { # TODO: enable all DBMS that are supported by DBConnector
     connectionDetails <- DatabaseConnector::createConnectionDetails(
       dbms = DBMS,
       server = DATABASE,
@@ -270,6 +270,7 @@ server <- function(input, output, session) {
   
   #################### KM PLOTS FOR DEFINED TARGET OUTCOMES ####################
   
+  
   # Build survival data for each target condition.
   kmSurvivalData <- eventReactive(input$getData, {
     req(kmTrajectoriesData())
@@ -318,6 +319,7 @@ server <- function(input, output, session) {
     survivalList <- kmSurvivalData()
     plots <- lapply(names(survivalList), function(targetName) {
       survData <- survivalList[[targetName]]
+      # Fit the Kaplan-Meier survival model
       kmFit <- survfit(Surv(timeToEvent, event) ~ concept_name, data = survData)
       p <- ggsurvplot(
         kmFit,

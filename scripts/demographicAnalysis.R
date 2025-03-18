@@ -1,4 +1,5 @@
 library(lubridate)
+library(ggplot2)
 
 createPopulationPyramidForCondition <- function(cdm, conditionConceptId) {
   
@@ -31,7 +32,6 @@ createPopulationPyramidForCondition <- function(cdm, conditionConceptId) {
     mutate(count = ifelse(gender == "Male", -count, count))
   
   # Plot the population pyramid (ggplot2)
-  library(ggplot2)
   pyramidPlot <- ggplot(ageGenderCounts, aes(x = age_at_occurrence, y = count, fill = gender)) +
     geom_bar(stat = "identity") +
     coord_flip() +

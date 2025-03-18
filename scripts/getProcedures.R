@@ -1,5 +1,5 @@
 
-# Note: after FIRST condition occurrence of start condition
+# Note: procedures after FIRST condition occurrence of start condition
 getProceduresAfterStartCondition <- function(cdm, startConditionIds) {
   # Get the first occurrence date of the start condition for each patient
   firstOccurrence <- cdm$condition_occurrence %>%
