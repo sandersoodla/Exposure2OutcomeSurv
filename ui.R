@@ -95,9 +95,7 @@ ui <- fluidPage(
                    column(6, uiOutput("targetPyramidsUI"))
                  ),
         ),
-        tabPanel("Patient Timeline", plotOutput("patientTimeline")),
-        tabPanel("Trajectories containing start condition", DTOutput("trajectoryTable")),
-        tabPanel("Start to target", DTOutput("startToTargetConditionTable"))
+        tabPanel("Patient Timeline", plotOutput("patientTimeline"))
       ),
       width = 9
     )
