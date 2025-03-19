@@ -317,10 +317,13 @@ server <- function(input, output, session) {
   kmPlots <- reactive({
     req(kmSurvivalData())
     survivalList <- kmSurvivalData()
+    
     plots <- lapply(names(survivalList), function(targetName) {
       survData <- survivalList[[targetName]]
+      
       # Fit the Kaplan-Meier survival model
       kmFit <- survfit(Surv(timeToEvent, event) ~ concept_name, data = survData)
+      
       p <- ggsurvplot(
         kmFit,
         data = survData,
@@ -548,39 +551,103 @@ server <- function(input, output, session) {
   ########### PATIENT TIMELINE AND PYRAMIDS
   
   
-  # Render the patient timeline plot
-  output$patientTimeline <- renderPlot({
-    req(trajectoriesData())
-    req(input$selectedPatient)
-    patientData <- trajectoriesData() %>%
-      filter(person_id == input$selectedPatient)
-    
-    ggplot(patientData, aes(x = condition_start_date, y = concept_name)) +
-      geom_point() +
-      labs(
-        title = paste("Condition timeline for Patient", input$selectedPatient),
-        x = "Date",
-        y = "Condition"
-      ) +
-      theme_minimal()
+  # Module UI plotOutput
+  populationPyramidUI <- function(id) {
+    ns <- NS(id)
+    plotOutput(ns("pyramidPlot"))
+  }
+  
+  # Module Server: renders the population pyramid for the given condition
+  populationPyramidServer <- function(id, conditionId) {
+    moduleServer(id, function(input, output, session) {
+      output$pyramidPlot <- renderPlot({
+        # conditionId is expected to be a reactive value
+        createPopulationPyramidForCondition(cdm, conditionId())
+      })
+    })
+  }
+  
+  
+  # Dynamic UI for start condition pyramids
+  output$startPyramidsUI <- renderUI({
+    req(input$startConditionId)
+    tagList(
+      lapply(seq_along(input$startConditionId), function(i) {
+        # Each pyramid gets its own module instance
+        populationPyramidUI(paste0("startPyramid_", i))
+      })
+    )
   })
   
-  # Render the patient pyramid plots
-  output$patientPyramid1 <- renderPlot({
-    req(trajectoriesData())
-    req(input$startConditionId > 0)
-    
-    createPopulationPyramidForCondition(cdm, input$startConditionId)
-    
+  # Dynamic UI for target condition pyramids
+  output$targetPyramidsUI <- renderUI({
+    req(input$targetConditionId)
+    tagList(
+      lapply(seq_along(input$targetConditionId), function(i) {
+        populationPyramidUI(paste0("targetPyramid_", i))
+      })
+    )
   })
   
-  output$patientPyramid2 <- renderPlot({
-    req(trajectoriesData())
-    req(input$targetConditionId > 0)
-    
-    createPopulationPyramidForCondition(cdm, input$targetConditionId)
-    
+  # Call the module for each start condition
+  observe({
+    req(input$startConditionId)
+    for (i in seq_along(input$startConditionId)) {
+      local({
+        idx <- i  # Capture the loop variable
+        # Wrap the condition in a reactive expression
+        condition <- reactive({ input$startConditionId[idx] })
+        populationPyramidServer(paste0("startPyramid_", idx), condition)
+      })
+    }
   })
+  
+  # Call the module for each target condition
+  observe({
+    req(input$targetConditionId)
+    for (i in seq_along(input$targetConditionId)) {
+      local({
+        idx <- i
+        condition <- reactive({ input$targetConditionId[idx] })
+        populationPyramidServer(paste0("targetPyramid_", idx), condition)
+      })
+    }
+  })
+  
+  
+#  # Render the patient timeline plot
+#  output$patientTimeline <- renderPlot({
+#    req(trajectoriesData())
+#    req(input$selectedPatient)
+#    patientData <- trajectoriesData() %>%
+#      filter(person_id == input$selectedPatient)
+#    
+#    ggplot(patientData, aes(x = condition_start_date, y = concept_name)) +
+#      geom_point() +
+#      labs(
+#        title = paste("Condition timeline for Patient", input$selectedPatient),
+#        x = "Date",
+#        y = "Condition"
+#      ) +
+#      theme_minimal()
+#  })
+#  
+#  # Render the patient pyramid plots
+#  output$patientPyramid1 <- renderPlot({
+#    req(trajectoriesData())
+#    req(input$startConditionId > 0)
+#    
+#    createPopulationPyramidForCondition(cdm, input$startConditionId)
+#    
+#  })
+#  
+#  output$patientPyramid2 <- renderPlot({
+#    req(trajectoriesData())
+#    req(input$targetConditionId > 0)
+#    
+#    createPopulationPyramidForCondition(cdm, input$targetConditionId)
+#    
+#  })
   
   
   

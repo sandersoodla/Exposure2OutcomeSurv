@@ -91,8 +91,8 @@ ui <- fluidPage(
         ),
         tabPanel("Demographic overview", 
                  fluidRow(
-                   column(6, plotOutput("patientPyramid1")),
-                   column(6, plotOutput("patientPyramid2"))
+                   column(6, uiOutput("startPyramidsUI")),
+                   column(6, uiOutput("targetPyramidsUI"))
                  ),
         ),
         tabPanel("Patient Timeline", plotOutput("patientTimeline")),
