@@ -614,41 +614,22 @@ server <- function(input, output, session) {
     }
   })
   
-  
-#  # Render the patient timeline plot
-#  output$patientTimeline <- renderPlot({
-#    req(trajectoriesData())
-#    req(input$selectedPatient)
-#    patientData <- trajectoriesData() %>%
-#      filter(person_id == input$selectedPatient)
-#    
-#    ggplot(patientData, aes(x = condition_start_date, y = concept_name)) +
-#      geom_point() +
-#      labs(
-#        title = paste("Condition timeline for Patient", input$selectedPatient),
-#        x = "Date",
-#        y = "Condition"
-#      ) +
-#      theme_minimal()
-#  })
-#  
-#  # Render the patient pyramid plots
-#  output$patientPyramid1 <- renderPlot({
-#    req(trajectoriesData())
-#    req(input$startConditionId > 0)
-#    
-#    createPopulationPyramidForCondition(cdm, input$startConditionId)
-#    
-#  })
-#  
-#  output$patientPyramid2 <- renderPlot({
-#    req(trajectoriesData())
-#    req(input$targetConditionId > 0)
-#    
-#    createPopulationPyramidForCondition(cdm, input$targetConditionId)
-#    
-#  })
-  
+  # Render the patient timeline plot
+  output$patientTimeline <- renderPlot({
+    req(trajectoriesData())
+    req(input$selectedPatient)
+    patientData <- trajectoriesData() %>%
+      filter(person_id == input$selectedPatient)
+    
+    ggplot(patientData, aes(x = condition_start_date, y = concept_name)) +
+      geom_point() +
+      labs(
+        title = paste("Condition timeline for Patient", input$selectedPatient),
+        x = "Date",
+        y = "Condition"
+      ) +
+      theme_minimal()
+  })
   
   
   session$onSessionEnded(function() {
