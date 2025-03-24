@@ -62,30 +62,15 @@ server <- function(input, output, session) {
   allConditionConcepts <- getAllConditionsWithOccurrences(cdm)
   
   # Update choices for selectizeInput
-  updateConditionChoices <- function(session, inputId, conceptId = character(0)) {
-    print(paste("Updating choices for:", inputId, "with conceptId:", conceptId))
-    if (length(conceptId) == 0 | all(is.na(conceptId))) {
-      
-      choiceList <- setNames(allConditionConcepts$concept_id, allConditionConcepts$concept_name_id)
-      updateSelectizeInput(session, inputId, choices = choiceList, server = TRUE,
+  updateConditionChoices <- function(session, inputId) {
+    choiceList <- setNames(allConditionConcepts$concept_id, allConditionConcepts$concept_name_id)
+    updateSelectizeInput(session, inputId, choices = choiceList, server = TRUE,
                            options = list(
                              placeholder = "Type to search conditions",
                              maxOptions = 10,
                              searchField = "label"
-                           ))
-      
-    } else {
-      # Fetch related concepts for dynamic update, currently does the same as the other branch
-      choiceList <- setNames(allConditionConcepts$concept_id, allConditionConcepts$concept_name_id)
-      #choices <- getRelatedConcepts(cdm, conceptId)
-      #choiceList <- setNames(choices$concept_id, choices$concept_name_id)
-      updateSelectizeInput(session, inputId, choices = choiceList, server = TRUE,
-                           options = list(
-                             placeholder = "Type to search related conditions",
-                             maxOptions = 10,
-                             searchField = "label"
-                           ))
-    }
+                           )
+                         )
   }
   
   
@@ -95,11 +80,59 @@ server <- function(input, output, session) {
   ## Initialize target condition choices
   updateConditionChoices(session, "targetConditionId")
   
+  ### FROM FILE
   
+  # Helper function to extract condition IDs from an uploaded CSV file:
+  extractConditionIds <- function(file) {
+    req(file)
+
+    #df <- tryCatch({
+    #  # First attempt: Read with tab separator (for ATLAS and ATHENA files)
+    #  read.csv(file$datapath, sep = "\t", stringsAsFactors = FALSE)
+    #}, error = function(e) {
+    #  # If it fails, try reading with a comma separator
+    #  read.csv(file$datapath, stringsAsFactors = FALSE)
+    #})
+    
+    df <- read.delim(file$datapath, stringsAsFactors = FALSE)
+
+    possibleCols <- c("Id", "condition_source_concept_id", "concept_id", "condition_concept_id")
+    colFound <- intersect(possibleCols, colnames(df))
+    if (length(colFound) > 0) {
+      return(as.character(df[[colFound[1]]]))
+    } else {
+      showNotification("Uploaded file does not contain any valid column name for condition IDs.",
+                       type = "error")
+      return(NULL)
+    }
+  }
   
-  #output$startConditionText <- renderText(paste(input$startConditionId, getConditionName(cdm, input$startConditionId)))
+  # When a start condition file is uploaded, update the selected values:
+  observeEvent(input$startConditionFile, {
+    ids <- extractConditionIds(input$startConditionFile)
+    if (!is.null(ids)) {
+      updateSelectizeInput(session,
+                           "startConditionId",
+                           choices = setNames(allConditionConcepts$concept_id,
+                                              allConditionConcepts$concept_name_id),
+                           selected = ids,
+                           server = TRUE)
+    }
+  })
   
-  #output$targetConditionText <- renderText(paste(input$targetConditionId, getConditionName(cdm, input$targetConditionId)))
+  # When a target condition file is uploaded, update the selected values:
+  observeEvent(input$targetConditionFile, {
+    ids <- extractConditionIds(input$targetConditionFile)
+    if (!is.null(ids)) {
+      updateSelectizeInput(session,
+                           "targetConditionId",
+                           choices = setNames(allConditionConcepts$concept_id,
+                                              allConditionConcepts$concept_name_id),
+                           selected = ids,
+                           server = TRUE)
+    }
+  })
+  
   
   
   ############### TRAJECTORY DATA

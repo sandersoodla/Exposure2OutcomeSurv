@@ -21,9 +21,10 @@ ui <- fluidPage(
   
   sidebarLayout(
     sidebarPanel(
+      fileInput("startConditionFile", "Upload Start Conditions CSV", accept = ".csv"),
       selectizeInput(
         "startConditionId",
-        "Start Condition concept",
+        "or select start condition concepts:",
         choices = NULL,
         selected = character(0),
         multiple = TRUE,
@@ -31,11 +32,11 @@ ui <- fluidPage(
           plugins = list("remove_button"),
           placeholder = "Type to search conditions")
       ),
-      textOutput("startConditionText"),
       hr(),
+      fileInput("targetConditionFile", "Upload Target Conditions CSV", accept = ".csv"),
       selectizeInput(
         "targetConditionId",
-        "Target Condition concept",
+        "or select target condition concepts:",
         choices = NULL,
         selected = character(0),
         multiple = TRUE,
@@ -43,7 +44,6 @@ ui <- fluidPage(
           plugins = list("remove_button"),
           placeholder = "Type to search conditions")
       ),
-      textOutput("targetConditionText"),
       actionButton("getData", "Get stats"),
       hr(),
       selectizeInput(
