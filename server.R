@@ -59,15 +59,14 @@ server <- function(input, output, session) {
   ######### CONDITION INPUT
   
   # Fetch all condition concepts that have at least 1 occurrence for initial choices
-  allConditionConcepts <- getAllConditionsWithOccurrences(cdm)
+  allOccurredConditions <- getAllConditionsWithOccurrences(cdm)
   
   # Update choices for selectizeInput
   updateConditionChoices <- function(session, inputId) {
-    choiceList <- setNames(allConditionConcepts$concept_id, allConditionConcepts$concept_name_id)
+    choiceList <- setNames(allOccurredConditions$concept_id, allOccurredConditions$concept_name_id)
     updateSelectizeInput(session, inputId, choices = choiceList, server = TRUE,
                            options = list(
                              placeholder = "Type to search conditions",
-                             maxOptions = 10,
                              searchField = "label"
                            )
                          )
@@ -80,7 +79,8 @@ server <- function(input, output, session) {
   ## Initialize target condition choices
   updateConditionChoices(session, "targetConditionId")
   
-  ### FROM FILE
+  
+  ### CONDITION INPUT FROM FILE
   
   # Helper function to extract condition IDs from an uploaded CSV file:
   extractConditionIds <- function(file) {
@@ -99,7 +99,7 @@ server <- function(input, output, session) {
     }
     
     if (length(colFound) > 0) {
-      return(as.character(df[[colFound[1]]]))
+      return(df[[colFound[1]]])
     } else {
       showNotification("Uploaded file does not contain any valid column name for condition IDs.",
                        type = "error")
@@ -107,16 +107,72 @@ server <- function(input, output, session) {
     }
   }
   
-  # When a start condition file is uploaded, update the selected values:
   observeEvent(input$startConditionFile, {
-    ids <- extractConditionIds(input$startConditionFile)
-    if (!is.null(ids)) {
-      updateSelectizeInput(session,
-                           "startConditionId",
-                           choices = setNames(allConditionConcepts$concept_id,
-                                              allConditionConcepts$concept_name_id),
-                           selected = ids,
-                           server = TRUE)
+    sourceIds <- extractConditionIds(input$startConditionFile)
+    if (!is.null(sourceIds)) {
+      # Map source concept ids to standard concept ids
+      mapping <- mapInputToStandardIds(cdm, sourceIds)
+
+      # Identify unmapped source concept IDs
+      unmappedSourceIds <- setdiff(sourceIds, mapping$input_concept_id)
+      
+      # Check if there are any mappings
+      if (nrow(mapping) == 0) {
+        # If no mappings, then check which input IDs are already standard and exist in the dataset
+        occurredStandardIds <- sourceIds[sourceIds %in% allOccurredConditions$concept_id]
+      } else {
+        # Identify mapped standard IDs that occur in the dataset
+        occurredStandardIds <- mapping$standard_concept_id[mapping$standard_concept_id %in% allOccurredConditions$concept_id]
+      }
+      
+      # Create a detailed mapping table
+      mappingDetails <- mapping %>%
+        mutate(
+          status = as.character(ifelse(standard_concept_id %in% allOccurredConditions$concept_id,
+                              "Mapped", "Mapped, no occurrences"))
+        )
+      
+      # If there are unmapped source IDs, add them as separate rows
+      if (length(unmappedSourceIds) > 0) {
+        unmappedDf <- data.frame(
+          input_concept_id = unmappedSourceIds,
+          standard_concept_id = NA,
+          status = "Not mapped",
+          stringsAsFactors = FALSE
+        )
+        
+        # Update the status to "Standard" if the unmapped ID is in allOccurredConditions
+        unmappedDf$status[unmappedDf$input_concept_id %in% allOccurredConditions$concept_id] <- "Standard"
+        
+        mappingDetails <- dplyr::bind_rows(mappingDetails, unmappedDf)
+      }
+      
+      # Show a modal dialog with the mapping details
+      showModal(modalDialog(
+        title = "Input conditions mapped to standard concepts",
+        "Standard - input condition ID is already a standard concept ID; 
+        Not mapped - ID is non-standard and couldn't be mapped with concept_relationship;
+        Mapped, no occurrences - ID mapped to standard, no occurrences in the dataset",
+        DT::dataTableOutput("mappingTableDetails"),
+        easyClose = TRUE,
+        size = "l",
+        footer = modalButton("Close")
+      ))
+      
+      # Render the mapping details table in the modal
+      output$mappingTableDetails <- DT::renderDataTable({
+        DT::datatable(mappingDetails, options = list(pageLength = 10))
+      })
+      
+      # Finally, update the selectizeInput with only occurring standard concept IDs
+      updateSelectizeInput(
+        session,
+        "startConditionId",
+        choices = setNames(allOccurredConditions$concept_id,
+                           allOccurredConditions$concept_name_id),
+        selected = occurredStandardIds,
+        server = TRUE
+      )
     }
   })
   
@@ -126,8 +182,8 @@ server <- function(input, output, session) {
     if (!is.null(ids)) {
       updateSelectizeInput(session,
                            "targetConditionId",
-                           choices = setNames(allConditionConcepts$concept_id,
-                                              allConditionConcepts$concept_name_id),
+                           choices = setNames(allOccurredConditions$concept_id,
+                                              allOccurredConditions$concept_name_id),
                            selected = ids,
                            server = TRUE)
     }

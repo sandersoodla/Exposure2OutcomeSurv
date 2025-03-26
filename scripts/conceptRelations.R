@@ -1,5 +1,17 @@
 library(dplyr)
 
+# Function to map source IDs to standard concept IDs
+mapInputToStandardIds <- function(cdm, sourceIds) {
+  # Query the concept_relationship table from the CDM
+  mappingDf <- cdm$concept_relationship %>%
+    filter(relationship_id == "Maps to") %>%
+    filter(concept_id_1 %in% sourceIds) %>%
+    select(input_concept_id = concept_id_1, standard_concept_id = concept_id_2) %>%
+    collect()
+  
+  return(mappingDf)
+}
+
 getRelatedConcepts <- function(cdm, conceptId) {
   
   relatedConcepts <- cdm$concept_relationship %>%
