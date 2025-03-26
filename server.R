@@ -85,19 +85,19 @@ server <- function(input, output, session) {
   # Helper function to extract condition IDs from an uploaded CSV file:
   extractConditionIds <- function(file) {
     req(file)
-
-    #df <- tryCatch({
-    #  # First attempt: Read with tab separator (for ATLAS and ATHENA files)
-    #  read.csv(file$datapath, sep = "\t", stringsAsFactors = FALSE)
-    #}, error = function(e) {
-    #  # If it fails, try reading with a comma separator
-    #  read.csv(file$datapath, stringsAsFactors = FALSE)
-    #})
     
-    df <- read.delim(file$datapath, stringsAsFactors = FALSE)
-
     possibleCols <- c("Id", "condition_source_concept_id", "concept_id", "condition_concept_id")
+    
+    # Try reading as tab-separated file first (ATLAS and ATHENA files)
+    df <- read.delim(file$datapath, stringsAsFactors = FALSE)
     colFound <- intersect(possibleCols, colnames(df))
+    
+    # If no valid columns found, try reading as comma-separated file.
+    if (length(colFound) == 0) {
+      df <- read.csv(file$datapath, stringsAsFactors = FALSE)
+      colFound <- intersect(possibleCols, colnames(df))
+    }
+    
     if (length(colFound) > 0) {
       return(as.character(df[[colFound[1]]]))
     } else {
