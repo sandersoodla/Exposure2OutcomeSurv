@@ -453,7 +453,7 @@ server <- function(input, output, session) {
     
     # Name the list elements using target condition names.
     targetNames <- sapply(input$targetConditionId, function(id) {
-      nm <- allConditionConcepts$concept_name_id[allConditionConcepts$concept_id == id]
+      nm <- allOccurredConditions$concept_name_id[allOccurredConditions$concept_id == id]
       if (length(nm) == 0) id else nm
     })
     names(survivalList) <- targetNames
