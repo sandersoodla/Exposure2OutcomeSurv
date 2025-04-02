@@ -437,15 +437,15 @@ server <- function(input, output, session) {
               trajTarget$person_id == person_id &
                 trajTarget$condition_start_date > condition_start_date
             ]
-            if (length(possibleTargets) > 0) min(possibleTargets) else as.Date(NA)
+            if (length(possibleTargets) > 0) as.Date(min(possibleTargets)) else as.Date(NA)
           }
         ) %>%
         ungroup()
       censorDate <- max(traj$condition_start_date, na.rm = TRUE)
       survivalDf <- survivalDf %>%
         mutate(
-          event = ifelse(!is.na(targetDate), 1, 0),
-          finalDate = as.Date(ifelse(event == 1, as.character(targetDate), as.character(censorDate))),
+          event = if_else(!is.na(targetDate), 1, 0),
+          finalDate = if_else(event == 1, targetDate, censorDate),
           timeToEvent = as.numeric(finalDate - condition_start_date)
         )
       survivalDf
@@ -457,6 +457,7 @@ server <- function(input, output, session) {
       if (length(nm) == 0) id else nm
     })
     names(survivalList) <- targetNames
+    print(survivalList)
     survivalList
   })
   
