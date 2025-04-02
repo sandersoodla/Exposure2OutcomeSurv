@@ -4,6 +4,7 @@ source("scripts/demographicAnalysis.R")
 source("scripts/getMetadata.R")
 source("scripts/conceptRelations.R")
 source("scripts/getProcedures.R")
+source("scripts/getAllTrajectories.R")
 
 library(shiny)
 library(DT)
@@ -261,15 +262,22 @@ server <- function(input, output, session) {
     return(df)
   })
   
-  # For KM analysis events for both start and target conditions are needed
-  kmTrajectoriesData <- eventReactive(input$getData, {
-    req(length(input$startConditionId) > 0)
-    req(length(input$targetConditionId) > 0)
-    unionIds <- union(input$startConditionId, input$targetConditionId)
-    df <- getTrajectoriesForCondition(cdm, unionIds)
-    return(df)
+  # All trajectories, for KM analysis
+  allTrajectoriesData <- eventReactive(input$getData, {
+    allTrajectories <- getAllTrajectories(cdm)
+    return(allTrajectories)
   })
   
+  # # For KM analysis events for both start and target conditions are needed
+  # kmTrajectoriesData <- eventReactive(input$getData, {
+  #   req(length(input$startConditionId) > 0)
+  #   req(length(input$targetConditionId) > 0)
+  #   unionIds <- union(input$startConditionId, input$targetConditionId)
+  #   df <- getTrajectoriesForCondition(cdm, unionIds)
+  #   return(df)
+  # })
+  
+  # CAN BE REMOVED IF I REMOVE THE PROCEDURES SANKEY PLOT
   # Trajectories filtered to observe from start condition onwards
   trajectoriesDataFromStartCondition <- eventReactive(trajectoriesData(), {
     req(trajectoriesData())
@@ -418,80 +426,100 @@ server <- function(input, output, session) {
   #################### KM PLOTS FOR DEFINED TARGET OUTCOMES ####################
   
   
-  # Build survival data for each target condition.
-  kmSurvivalData <- eventReactive(input$getData, {
-    req(kmTrajectoriesData())
-    req(length(input$startConditionId) > 0, length(input$targetConditionId) > 0)
-    traj <- kmTrajectoriesData()
+  # For every start and target condition pair, build a survival dataset and KM plot
+  kmSurvivalDataPairs <- eventReactive(input$getData, {
+    req(allTrajectoriesData())
+    traj <- allTrajectoriesData()
+    censorDate <- max(traj$condition_start_date, na.rm = TRUE)
     
-    survivalList <- lapply(input$targetConditionId, function(target) {
-      # Start events: those with a start condition.
-      trajStart <- traj %>% filter(concept_id %in% input$startConditionId)
-      # Target events: events matching the target condition.
-      trajTarget <- traj %>% filter(concept_id == target)
-      survivalDf <- trajStart %>%
-        rowwise() %>%
-        mutate(
-          targetDate = {
-            possibleTargets <- trajTarget$condition_start_date[
-              trajTarget$person_id == person_id &
-                trajTarget$condition_start_date > condition_start_date
-            ]
-            if (length(possibleTargets) > 0) as.Date(min(possibleTargets)) else as.Date(NA)
-          }
-        ) %>%
-        ungroup()
-      censorDate <- max(traj$condition_start_date, na.rm = TRUE)
-      survivalDf <- survivalDf %>%
-        mutate(
-          event = if_else(!is.na(targetDate), 1, 0),
-          finalDate = if_else(event == 1, targetDate, censorDate),
-          timeToEvent = as.numeric(finalDate - condition_start_date)
-        )
-      survivalDf
-    })
+    # Get the full list of persons
+    population <- traj %>%
+      group_by(person_id) %>%
+      summarise(baseline_date = min(condition_start_date), .groups = "drop")
     
-    # Name the list elements using target condition names.
-    targetNames <- sapply(input$targetConditionId, function(id) {
-      nm <- allOccurredConditions$concept_name_id[allOccurredConditions$concept_id == id]
-      if (length(nm) == 0) id else nm
+    # Create a nested list: outer list for start condition and inner list for target condition.
+    lapply(input$startConditionId, function(startId) {
+      lapply(input$targetConditionId, function(targetId) {
+        
+        # For each person, determine if they had the start condition and, if so, when.
+        startCondDates <- traj %>%
+          filter(concept_id == startId) %>%
+          group_by(person_id) %>%
+          summarise(start_cond_date = min(condition_start_date), .groups = "drop")
+        
+        # Get first occurrence of the target condition (if any) after the index_date.
+        targetDates <- traj %>%
+          filter(concept_id == targetId) %>%
+          group_by(person_id) %>%
+          summarise(target_date = min(condition_start_date), .groups = "drop")
+        
+        # Merge the data and calculate survival information.
+        survData <- population %>%
+          left_join(startDates, by = "person_id") %>%
+          left_join(targetDates, by = "person_id") %>%
+          mutate(
+            # Group: "With Start" if a start_date exists, otherwise "Without Start"
+            group = if_else(!is.na(start_cond_date), "With Start", "Without Start"),
+            
+            # Use the start_date if available; if not, fallback to the baseline date.
+            index_date = coalesce(start_cond_date, baseline_date),
+            
+            # An event is counted only if the target_date occurs after the index_date.
+            event = if_else(!is.na(target_date) & (target_date > index_date), 1, 0),
+            
+            # For patients with an event, use the target_date; otherwise, use the censorDate.
+            final_date = if_else(event == 1, target_date, censorDate),
+            
+            time_to_event = as.numeric(final_date - index_date)
+          )
+
+        survData
+      })
     })
-    names(survivalList) <- targetNames
-    print(survivalList)
-    survivalList
   })
   
-  # Create KM plots for each target outcome.
-  kmPlots <- reactive({
-    req(kmSurvivalData())
-    survivalList <- kmSurvivalData()
+  # Generate KM plots for each start-target pair:
+  kmPlotsPairs <- eventReactive(kmSurvivalDataPairs(), {
+    req(kmSurvivalDataPairs())
+    # Create an empty list to store plots. Use names that indicate the pair.
+    plotsList <- list()
     
-    plots <- lapply(names(survivalList), function(targetName) {
-      survData <- survivalList[[targetName]]
-      
-      # Fit the Kaplan-Meier survival model
-      kmFit <- survfit(Surv(timeToEvent, event) ~ concept_name, data = survData)
-      
-      p <- ggsurvplot(
-        kmFit,
-        data = survData,
-        conf.int = TRUE,
-        pval = TRUE,
-        risk.table = TRUE,
-        legend.title = "Start Condition",
-        title = paste("KM Curves for Outcome:", targetName),
-        xlab = "Days from Start Condition",
-        ylab = "Outcome-free probability"
-      )$plot
-      p
-    })
-    plots
+    for (i in seq_along(input$startConditionId)) {
+      for (j in seq_along(input$targetConditionId)) {
+        # Retrieve the survival data for this pair.
+        survData <- kmSurvivalDataPairs()[[i]][[j]]
+        
+        # Fit a KM model using the group variable (With vs. Without start condition)
+        kmFit <- survfit(Surv(time_to_event, event) ~ group, data = survData)
+        
+        # Get labels for the plot (customize as needed)
+        startLabel <- allOccurredConditions$concept_name_id[allOccurredConditions$concept_id == input$startConditionId[i]]
+        targetLabel <- allOccurredConditions$concept_name_id[allOccurredConditions$concept_id == input$targetConditionId[j]]
+        pairLabel <- paste0("Start: ", startLabel, " | Target: ", targetLabel)
+        
+        p <- ggsurvplot(
+          kmFit,
+          data = survData,
+          conf.int = TRUE,
+          pval = TRUE,
+          risk.table = TRUE,
+          legend.title = "Group",
+          title = pairLabel,
+          xlab = "Days from index date",
+          ylab = "Target-free probability"
+        )$plot
+        
+        plotsList[[pairLabel]] <- p
+      }
+    }
+
+    plotsList
   })
   
-  # Render the KM plots in a grid layout (two columns per row).
+  # Render the KM plots in a grid layout (adjust columns as needed)
   output$kmPlotsUI <- renderUI({
-    req(kmPlots())
-    plots <- kmPlots()
+    req(kmPlotsPairs())
+    plots <- kmPlotsPairs()
     numPlots <- length(plots)
     colsPerRow <- 2
     numRows <- ceiling(numPlots / colsPerRow)
@@ -501,7 +529,7 @@ server <- function(input, output, session) {
       rowPlots <- list()
       for (c in 1:colsPerRow) {
         if (index <= numPlots) {
-          rowPlots[[c]] <- column(width = 6, plotOutput(outputId = paste0("kmPlot_", index)))
+          rowPlots[[c]] <- column(width = 6, plotOutput(outputId = paste0("kmPairPlot_", index)))
           index <- index + 1
         }
       }
@@ -510,21 +538,22 @@ server <- function(input, output, session) {
     do.call(tagList, plotTags)
   })
   
-  # Render each KM plot output.
+  # Render each individual KM plot output.
   observe({
-    req(kmPlots())
-    for (i in seq_along(kmPlots())) {
+    req(kmPlotsPairs())
+    numPlots <- length(kmPlotsPairs())
+    for (i in seq_len(numPlots)) {
       local({
         ii <- i
-        outputId <- paste0("kmPlot_", ii)
+        outputId <- paste0("kmPairPlot_", ii)
         output[[outputId]] <- renderPlot({
-          kmPlots()[[ii]]
+          kmPlotsPairs()[[ii]]
         })
       })
     }
   })
   
-  
+
   
   
   ################# PROCEDURE DATA ###################
