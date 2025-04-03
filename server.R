@@ -4,7 +4,7 @@ source("scripts/demographicAnalysis.R")
 source("scripts/getMetadata.R")
 source("scripts/conceptRelations.R")
 source("scripts/getProcedures.R")
-source("scripts/getAllTrajectories.R")
+source("scripts/getObservationPeriod.R")
 
 library(shiny)
 library(DT)
@@ -263,12 +263,6 @@ server <- function(input, output, session) {
     return(df)
   })
   
-  # All trajectories, for KM analysis
-  allTrajectoriesData <- eventReactive(input$getData, {
-    allTrajectories <- getAllTrajectories(cdm)
-    return(allTrajectories)
-  })
-  
   
   # CAN BE REMOVED IF I REMOVE THE PROCEDURES SANKEY PLOT
   # Trajectories filtered to observe from start condition onwards
@@ -421,150 +415,246 @@ server <- function(input, output, session) {
   # Demographic data used for matching a control group
   demographics <- getAllGendersAndBirthyears(cdm)
   
-  # For every start and target condition pair, build a matched survival dataset and KM plot
-  kmSurvivalDataPairs <- eventReactive(input$getData, {
-    req(allTrajectoriesData())
+  
+  # Helper Function: Performs propensity score matching.
+  # Attempts to match cases (start condition) to controls based on covariates.
+  performMatching <- function(population, casePersonIds, startId) {
+    # 1. Prepare data for matching: add a binary indicator for case status.
+    matchDataBase <- population %>%
+      mutate(
+        group_indicator = if_else(person_id %in% casePersonIds, 1, 0)
+      )
     
-    traj <- allTrajectoriesData()
-    censorDate <- max(traj$condition_start_date, na.rm = TRUE)
-    
-    # Get population with demographics, filter out those without necessary data upfront
-    population <- traj %>%
-      distinct(person_id, .keep_all = TRUE) %>%
-      inner_join(demographics, by = "person_id") %>%
-      filter(!is.na(gender_concept_id) & !is.na(year_of_birth))
-    
-    # Pre-calculate target dates for efficiency
-    allTargetDates <- traj %>%
-      filter(concept_id %in% input$targetConditionId) %>%
-      group_by(person_id, concept_id) %>%
-      summarise(target_date = min(condition_start_date), .groups = "drop")
-    
-    
-    # Iterate through each Start Condition for Matching
-    lapply(input$startConditionId, function(startId) {
-      
-      # 1. Identify first occurrence date for the current start condition
-      startCondDates <- traj %>%
-        filter(concept_id == startId) %>%
-        group_by(person_id) %>%
-        summarise(start_cond_date = min(condition_start_date), .groups = "drop")
-      
-      # 2. Prepare the base dataset for matching for *this* start condition
-      matchDataBase <- population %>%
-        left_join(startCondDates, by = "person_id") %>%
-        mutate(
-          # Indicator: 1 if they have the start condition (case), 0 otherwise (potential control)
-          has_start_condition = if_else(!is.na(start_cond_date), 1, 0),
-          # Store the potential index date (start date for cases, NA for controls)
-          # This is only used temporarily before alignment
-          index_date_potential = start_cond_date,
-          # Convert gender concept to categorical factor for matchit
-          gender_concept_id = factor(gender_concept_id)
-        )
-      
-      # 3. Check if there are enough cases and potential controls
-      n_cases <- sum(matchDataBase$has_start_condition == 1)
-      n_controls_potential <- sum(matchDataBase$has_start_condition == 0)
-      
-      if (n_cases == 0) {
-        showNotification(paste("No patients found with the start condition ID:", startId, " and required demographic data. Skipping."), type = "warning")
-        return(NULL)
-      }
-      # Ensure the cases actually have a start date needed for index date alignment
-      if (nrow(matchDataBase %>% filter(has_start_condition == 1, is.na(index_date_potential))) > 0) {
-        showNotification(paste("Error: Some cases with start condition ID:", startId, " have a missing start_cond_date. Cannot proceed."), type = "error")
-        return(NULL)
-      }
-      if (n_controls_potential == 0) {
-        showNotification(paste("No potential controls found for start condition ID:", startId, " with required demographic data. Skipping."), type = "warning")
-        return(NULL)
-      }
-      
-      
-      # 4. Perform Matching
-      matchResult <- tryCatch({
-        matchit(
-          has_start_condition ~ year_of_birth + gender_concept_id, # Formula for matching
-          data = matchDataBase,
-          method = "nearest",
-          ratio = 2 # 1:2 matching
-        )
-      }, error = function(e) {
-        showNotification(paste("Matching failed for start condition ID:", startId, "-", e$message), type = "error")
-        return(NULL)
-      })
-      
-      if (is.null(matchResult)) return(NULL) # Exit if matching failed
-      
-      # 5. Extract Matched Data
-      matchedData <- match.data(matchResult)
-      
-      if (nrow(matchedData) == 0) {
-        showNotification(paste("Matching yielded no pairs for start condition ID:", startId, ". Skipping."), type = "warning")
-        return(NULL)
-      }
-      
-      # 6. Align Index Dates: Assign Case's index date to their matched Control(s)
-      matchedDataWithAlignedIndex <- matchedData %>%
-        group_by(subclass) %>% # Group by matched set ID
-        mutate(
-          # Get the case's potential index date (their start_cond_date)
-          # Assign it to the 'index_date' column for everyone in this subclass
-          index_date = index_date_potential[has_start_condition == 1][1]
-        ) %>%
-        ungroup() %>%
-        filter(!is.na(index_date)) # Ensure alignment worked and produced a valid date
-      
-      if (nrow(matchedDataWithAlignedIndex) < nrow(matchedData)) {
-        warning(paste("Some matched pairs removed for Start ID:", startId, "due to missing index date after alignment (problem with case start_cond_date?)."))
-      }
-      if (nrow(matchedDataWithAlignedIndex) == 0) {
-        showNotification(paste("No matched pairs remained after index date alignment for Start ID:", startId, ". Skipping."), type = "warning")
-        return(NULL)
-      }
-      
-      
-      # --- Iterate through each Target Condition for Survival Analysis on Matched Data ---
-      lapply(input$targetConditionId, function(targetId) {
-        
-        # 7. Get target dates for the *current* target condition
-        currentTargetDates <- allTargetDates %>%
-          filter(concept_id == targetId) %>%
-          select(person_id, target_date)
-        
-        # 8. Calculate Survival Variables using aligned index dates
-        survData <- matchedDataWithAlignedIndex %>%
-          left_join(currentTargetDates, by = "person_id") %>%
-          mutate(
-            # Event: Target date exists AND is after the ALIGNED index date
-            event = if_else(!is.na(target_date) & target_date > index_date, 1, 0),
-            # Final Date: Event date if event occurred, otherwise censor date
-            final_date = if_else(event == 1, target_date, censorDate),
-            # Time-to-event: Difference from ALIGNED index date to final date
-            time_to_event = pmax(0, as.numeric(difftime(final_date, index_date, units = "days"))),
-            # Group Factor for plotting, based on the start condition status
-            group = factor(has_start_condition,
-                           levels = c(0, 1),
-                           labels = c("Control (Matched)", "Case (Start Cond.)"))
-          ) %>%
-          # Select columns needed for survfit and potentially diagnostics
-          select(person_id, time_to_event, event, group, subclass, index_date)
-        
-        # 9. Final checks on calculated survival data
-        if(any(is.na(survData$time_to_event)) | any(survData$time_to_event < 0)){
-          warning(paste("Issue with time_to_event calculation for Start ID:", startId, "Target ID:", targetId))
-          survData <- survData %>% filter(!is.na(time_to_event) & time_to_event >= 0)
-        }
-        
-        if(nrow(survData) < 2 || n_distinct(survData$group) < 2 || sum(survData$event, na.rm = TRUE) == 0) {
-          warning(paste("Insufficient data after matching/alignment for KM plot. Start:", startId, "Target:", targetId))
-          return(NULL) # Not enough data/groups/events to plot
-        }
-        
-        return(survData) # Return the final survival data for this pair
-      })
+    # 2. Execute matching using matchit within a tryCatch for error handling.
+    matchResult <- tryCatch({
+      matchit(
+        group_indicator ~ year_of_birth + gender_concept_id, # Matching formula
+        data = matchDataBase,                               # Input data
+        method = "nearest",                                  # Matching algorithm
+        ratio = 2                                            # Target control:case ratio
+      )
+    }, error = function(e) {
+      # Notify user and log warning if matching algorithm fails.
+      showNotification(paste("Matching failed for Start ID:", startId), type="warning", duration=5)
+      warning(paste("Matching failed for Start ID:", startId, "-", e$message))
+      # Return NULL to indicate matching failure.
+      return(NULL)
     })
+    
+    # 3. Extract the matched dataset. Assumes matchResult is valid.
+    return(match.data(matchResult))
+  }
+  
+  # Helper Function: Fetches dates and aligns index dates for the matched cohort.
+  # Retrieves start dates for cases, filters pairs, aligns index dates, gets censor date.
+  fetchAndAlignDates <- function(matchedData, cdm, startId) {
+    # 1. Get IDs of all matched individuals and just the cases.
+    # Assumes matchedData is a valid data frame from performMatching.
+    matchedPersonIds <- unique(matchedData$person_id)
+    casePersonIds <- matchedData %>% filter(group_indicator == 1) %>% pull(person_id) %>% unique()
+    
+    # 2. Fetch start condition dates for cases using tryCatch.
+    startCondDates <- tryCatch({
+      getFirstConditionDatesForPersons(cdm, personIds = casePersonIds, conceptIds = startId) %>%
+        rename(start_cond_date = condition_start_date) %>%
+        select(person_id, start_cond_date)
+    }, error = function(e) {
+      # Notify user if fetching start dates fails.
+      showNotification(paste("Error fetching start dates for Start ID:", startId), type="error", duration=5)
+      # Return NULL to indicate failure.
+      return(NULL)
+    })
+    
+    # --- Filtering and Alignment ---
+    # Steps below assume startCondDates is a valid data frame.
+    
+    # 3. Identify cases for whom a start date was found.
+    casesWithDates <- startCondDates %>% distinct(person_id)
+    # 4. Find the matched sets (subclasses) where the case has a start date.
+    subclassesToKeep <- matchedData %>%
+      filter(group_indicator == 1) %>%
+      semi_join(casesWithDates, by = "person_id") %>%
+      distinct(subclass)
+    
+    # 5. Filter the matched data to only include these complete subclasses.
+    matchedDataFiltered <- matchedData %>%
+      semi_join(subclassesToKeep, by = "subclass")
+    
+    # 6. Update the list of person IDs after filtering.
+    matchedPersonIds <- unique(matchedDataFiltered$person_id)
+    
+    # 7. Join the start dates back to the filtered matched data.
+    matchedDataWithStart <- matchedDataFiltered %>%
+      left_join(startCondDates, by = "person_id")
+    
+    # 8. Align index dates: Set index_date for controls to their matched case's start_cond_date.
+    matchedDataAligned <- matchedDataWithStart %>%
+      group_by(subclass) %>% # Process by matched set
+      mutate(
+        case_start_date = first(na.omit(start_cond_date[group_indicator == 1])), # Get case's start date
+        index_date = case_start_date                                            # Apply to all in set
+      ) %>%
+      ungroup() %>%
+      filter(!is.na(index_date)) # Remove rows where index date is NA (essential)
+    
+    # --- Determine Censor Date ---
+    # 9. Fetch the latest observation end date for the aligned cohort using tryCatch.
+    censorDate <- tryCatch({
+      getMaxObservationEndDate(cdm, matchedPersonIds)
+    }, error = function(e) {
+      # Notify user and use fallback if fetching fails.
+      showNotification(paste("Error fetching censor date for Start ID:", startId, ". Using fallback."), type="warning", duration=5)
+      return(Sys.Date())
+    })
+    # Use fallback if the fetched date is invalid.
+    if (is.na(censorDate) || !inherits(censorDate, "Date")) {
+      censorDate <- Sys.Date()
+    }
+    
+    # 10. Return the aligned data and the censor date.
+    return(list(alignedData = matchedDataAligned, censorDate = censorDate))
+  }
+  
+  
+  # Helper Function: Calculate survival time and event status.
+  # Computes time_to_event and event indicator for a specific target condition.
+  calculateSurvival <- function(alignedData, targetDatesForPerson, targetId, censorDate, indexDateCol = "index_date", groupCol = "group_indicator") {
+    
+    # 1. Filter the fetched target dates for the specific targetId of interest.
+    currentTargetDates <- targetDatesForPerson %>%
+      filter(concept_id == targetId) %>%
+      select(person_id, target_date = condition_start_date)
+    
+    # 2. Join target dates and calculate survival variables.
+    # Assumes alignedData is a valid data frame.
+    survData <- alignedData %>%
+      left_join(currentTargetDates, by = "person_id") %>% # Add target dates
+      mutate(
+        # Event = 1 if target exists and is after index date
+        event = if_else(!is.na(target_date) & target_date > .data[[indexDateCol]], 1, 0),
+        # Follow-up ends at event or censoring
+        final_date_raw = if_else(event == 1, target_date, censorDate),
+        # Ensure follow-up doesn't end before index date
+        final_date = pmax(final_date_raw, .data[[indexDateCol]], na.rm = TRUE),
+        # Calculate time difference in days (non-negative)
+        time_to_event = pmax(0, as.numeric(difftime(final_date, .data[[indexDateCol]], units = "days"))),
+        # Create factor for case/control group
+        group = factor(.data[[groupCol]],
+                       levels = c(0, 1),
+                       labels = c("Control (Matched)", "Case (Start Cond.)"))
+      ) %>%
+      # Select columns needed for survival analysis
+      select(person_id, time_to_event, event, group, subclass, index_date, target_date, final_date)
+    
+    # 3. Return the resulting data frame with survival variables.
+    return(survData)
+  }
+  
+  # --- Main Reactive Function to Generate Survival Data ---
+  # Orchestrates the entire process from matching to final survival data generation.
+  kmSurvivalDataPairs <- eventReactive(input$getData, {
+    # 1. Ensure required inputs and objects are available.
+    req(input$startConditionId, input$targetConditionId, nrow(demographics) > 0, cdm)
+    
+    # 2. Prepare the base demographic data for matching.
+    populationBase <- demographics %>%
+      filter(!is.na(gender_concept_id) & !is.na(year_of_birth)) %>%
+      mutate(gender_concept_id = factor(gender_concept_id)) %>%
+      select(person_id, year_of_birth, gender_concept_id)
+    
+    # --- Outer Loop: Process each selected Start Condition ---
+    resultsListStart <- lapply(input$startConditionId, function(startId) {
+      
+      # 3. Fetch persons having the current start condition (with error handling).
+      startCasePersons <- tryCatch({
+        getPeopleWithCondition(cdm, startId)
+      }, error = function(e) {
+        showNotification(paste("Error fetching persons for start condition", startId, ":", e$message), type = "error")
+        return(NULL) # Skip this startId if fetch fails
+      })
+      # Code proceeds assuming startCasePersons is valid if tryCatch didn't return NULL.
+      
+      # 4. Perform matching for the current start condition.
+      matchedData <- performMatching(populationBase, startCasePersons$person_id, startId)
+      # Code proceeds assuming matchedData is valid if performMatching didn't return NULL.
+      
+      # 5. Fetch dates and align index dates for the matched cohort.
+      dateInfo <- fetchAndAlignDates(matchedData, cdm, startId)
+      # Code proceeds assuming dateInfo is valid if fetchAndAlignDates didn't return NULL.
+      
+      # 6. Extract results from date fetching/alignment (will error if dateInfo is NULL).
+      alignedData <- dateInfo$alignedData
+      censorDate <- dateInfo$censorDate
+      alignedPersonIds <- unique(alignedData$person_id)
+      
+      # 7. Fetch all relevant target condition dates for the aligned cohort (with error handling).
+      allTargetDatesForMatched <- tryCatch({
+        getFirstConditionDatesForPersons(cdm, personIds = alignedPersonIds, conceptIds = input$targetConditionId)
+      }, error = function(e) {
+        showNotification(paste("Error fetching target dates for matched cohort (Start ID:", startId, "):", e$message), type = "error")
+        return(NULL) # Skip this startId if fetch fails
+      })
+      # Code proceeds assuming allTargetDatesForMatched is valid if tryCatch didn't return NULL.
+      
+      # --- Inner Loop: Process each selected Target Condition for the current Start Condition ---
+      resultsListTarget <- lapply(input$targetConditionId, function(targetId) {
+        # 8. Calculate survival variables for the current start-target pair.
+        survData <- calculateSurvival(
+          alignedData = alignedData,
+          targetDatesForPerson = allTargetDatesForMatched,
+          targetId = targetId,
+          censorDate = censorDate,
+          indexDateCol = "index_date",
+          groupCol = "group_indicator"
+        )
+        
+        # 9. Add start/target IDs to the survival data if it was created successfully.
+        if (!is.null(survData)) {
+          survData$start_condition_id <- startId
+          survData$target_condition_id <- targetId
+        }
+        # Return the result (data frame or NULL).
+        return(survData)
+      }) # End inner lapply
+      
+      # 10. Attempt to name the inner list elements by target ID.
+      if (length(resultsListTarget) > 0) {
+        tryCatch({ # Use tryCatch as naming might fail if list contains NULLs
+          valid_results <- resultsListTarget[!sapply(resultsListTarget, is.null)]
+          if(length(valid_results)>0){
+            names(resultsListTarget) <- sapply(valid_results, function(df) unique(df$target_condition_id))
+          }
+        }, error = function(e) { }) # Ignore naming errors
+      }
+      
+      # 11. Return the list of results for the current start ID.
+      return(resultsListTarget)
+      
+    }) # End outer lapply
+    
+    # 12. Assign the results to the final list variable.
+    # This list may contain NULLs where processing failed for a start ID.
+    finalNestedList <- resultsListStart
+    
+    # 13. Attempt to name the outer list elements by start ID.
+    if (length(finalNestedList) > 0) {
+      tryCatch({ # Use tryCatch as naming might fail
+        # Identify valid list elements for naming
+        valid_start_results <- finalNestedList[!sapply(finalNestedList, function(l) !is.list(l) || length(l) == 0 || is.null(l[[1]])) ]
+        if(length(valid_start_results)>0){
+          # Extract start IDs from the first valid data frame within each valid inner list
+          startIdsInList <- sapply(valid_start_results, function(innerList) {
+            unique(innerList[[1]]$start_condition_id)
+          })
+          # Assign names
+          names(finalNestedList) <- as.character(na.omit(startIdsInList))
+        }
+      }, error = function(e) { }) # Ignore naming errors
+    }
+    
+    # 14. Return the final nested list structure.
+    # Structure: List (named by startId) -> List (named by targetId) -> survData (data.frame)
+    return(finalNestedList)
   })
   
   # Generate KM plots for each start-target pair:
