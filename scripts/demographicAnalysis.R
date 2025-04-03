@@ -53,3 +53,13 @@ getPersonInfo <- function(cdm, personId) {
   
   return(personInfo)
 }
+
+
+getAllGendersAndBirthyears <- function(cdm) {
+  
+  genderAndYear <- cdm$person %>%
+    select(person_id, gender_concept_id, year_of_birth) %>%
+    collect()
+  
+  return(genderAndYear)
+}
