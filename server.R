@@ -445,6 +445,7 @@ server <- function(input, output, session) {
     return(match.data(matchResult))
   }
   
+  
   # Helper Function: Fetches dates and aligns index dates for the matched cohort.
   # Retrieves start dates for cases, filters pairs, aligns index dates, gets censor date.
   fetchAndAlignDates <- function(matchedData, cdm, startId) {
@@ -549,6 +550,7 @@ server <- function(input, output, session) {
     return(survData)
   }
   
+  
   # --- Main Reactive Function to Generate Survival Data ---
   # Orchestrates the entire process from matching to final survival data generation.
   kmSurvivalDataPairs <- eventReactive(input$getData, {
@@ -652,10 +654,11 @@ server <- function(input, output, session) {
     return(finalNestedList)
   })
   
-  # Generate KM plots for each start-target pair:
+  
+  # Generate KM plots and risk tables for each start-target pair:
   kmPlotsPairs <- eventReactive(kmSurvivalDataPairs(), {
     req(kmSurvivalDataPairs())
-    # Create an empty list to store plots. Use names that indicate the pair.
+    # Create an empty list to store plots and tables. Use names that indicate the pair.
     plotsList <- list()
     
     for (i in seq_along(input$startConditionId)) {
@@ -669,45 +672,60 @@ server <- function(input, output, session) {
         # Get labels for the plot
         startLabel <- allOccurredConditions$concept_name_id[allOccurredConditions$concept_id == input$startConditionId[i]]
         targetLabel <- allOccurredConditions$concept_name_id[allOccurredConditions$concept_id == input$targetConditionId[j]]
-        pairLabel <- paste0("Start: ", startLabel, " | Target: ", targetLabel)
+        pairLabel <- paste0("Start: ", startLabel, " | Outcome: ", targetLabel)
+        uniquePairKey <- paste0("pair_", input$startConditionId[i], "_", input$targetConditionId[j])
         
-        p <- ggsurvplot(
+        ggsurvObject <- ggsurvplot(
           kmFit,
           data = survData,
           conf.int = TRUE,
           pval = TRUE,
           risk.table = TRUE,
+          risk.table.height = 0.25,
           legend.title = "Group",
           title = pairLabel,
           xlab = "Days from index date",
           ylab = "Target-free probability"
-        )$plot
+        )
         
-        plotsList[[pairLabel]] <- p
+        # Store the entire ggsurvplot list object (plot + table)
+        if (!is.null(ggsurvObject)) {
+          plotsList[[uniquePairKey]] <- ggsurvObject
+        }
       }
     }
 
     plotsList
   })
   
-  # Render the KM plots in a grid layout (adjust columns as needed)
+  # Render the KM plots in a grid layout
   output$kmPlotsUI <- renderUI({
     req(kmPlotsPairs())
     plots <- kmPlotsPairs()
     numPlots <- length(plots)
+    
     colsPerRow <- 2
     numRows <- ceiling(numPlots / colsPerRow)
     plotTags <- list()
     index <- 1
+    
     for (r in 1:numRows) {
-      rowPlots <- list()
+      rowContent <- list()
       for (c in 1:colsPerRow) {
         if (index <= numPlots) {
-          rowPlots[[c]] <- column(width = 6, plotOutput(outputId = paste0("kmPairPlot_", index)))
+          # Use index to create unique output IDs for this pair
+          pairId <- paste0("kmPairOutput_", index)
+          
+          rowContent[[c]] <- column(width = 12 / colsPerRow,
+                                    # Placeholder for the KM plot
+                                    plotOutput(outputId = paste0(pairId, "_plot")),
+                                    # Placeholder for the risk table (with adjusted height)
+                                    plotOutput(outputId = paste0(pairId, "_table"), height = "200px")
+          )
           index <- index + 1
         }
       }
-      plotTags[[r]] <- fluidRow(rowPlots)
+      plotTags[[r]] <- fluidRow(rowContent)
     }
     do.call(tagList, plotTags)
   })
@@ -715,13 +733,38 @@ server <- function(input, output, session) {
   # Render each individual KM plot output.
   observe({
     req(kmPlotsPairs())
-    numPlots <- length(kmPlotsPairs())
+    plotsData <- kmPlotsPairs()
+    plotKeys <- names(plotsData)
+    numPlots <- length(plotKeys)
+    
     for (i in seq_len(numPlots)) {
       local({
         ii <- i
-        outputId <- paste0("kmPairPlot_", ii)
-        output[[outputId]] <- renderPlot({
-          kmPlotsPairs()[[ii]]
+        currentKey <- plotKeys[[ii]]
+        ggsurvObj <- plotsData[[currentKey]] # Get the ggsurvplot list object
+        
+        # Output ID for the main plot for this pair
+        plotOutputId <- paste0("kmPairOutput_", ii, "_plot")
+        # Output ID for the risk table for this pair
+        tableOutputId <- paste0("kmPairOutput_", ii, "_table")
+        
+        
+        # Render the main plot ($plot component)
+        output[[plotOutputId]] <- renderPlot({
+          if (!is.null(ggsurvObj) && !is.null(ggsurvObj$plot)) {
+            print(ggsurvObj$plot) # Extract and print the plot part
+          } else {
+            plot.new(); title(main = "KM Plot Unavailable") # Fallback
+          }
+        })
+        
+        # Render the risk table ($table component)
+        output[[tableOutputId]] <- renderPlot({
+          if (!is.null(ggsurvObj) && !is.null(ggsurvObj$table)) {
+            print(ggsurvObj$table) # Extract and print the table part
+          } else {
+            plot.new(); title(main = "Risk Table Unavailable") # Fallback
+          }
         })
       })
     }

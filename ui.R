@@ -10,7 +10,7 @@ ui <- fluidPage(
   fluidRow(
     column(width = 11,
            # Application title
-           titlePanel("Start condition to target condition overview")
+           titlePanel("Start condition to outcome overview")
     ),
     column(width = 1,
            textOutput("dbName"),
@@ -33,10 +33,10 @@ ui <- fluidPage(
           placeholder = "Type to search conditions")
       ),
       hr(),
-      fileInput("targetConditionFile", "Upload Target Conditions CSV", accept = ".csv"),
+      fileInput("targetConditionFile", "Upload Outcome Conditions CSV", accept = ".csv"),
       selectizeInput(
         "targetConditionId",
-        "or select target condition concepts:",
+        "or select outcome condition concepts:",
         choices = NULL,
         selected = character(0),
         multiple = TRUE,
