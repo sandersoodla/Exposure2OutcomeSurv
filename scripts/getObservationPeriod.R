@@ -1,13 +1,15 @@
 library(dplyr)
 
-getMaxObservationEndDate <- function(cdm, personIds) {
+getMaxObservationDates <- function(cdm, personIds) {
   if (length(personIds) == 0) return(as.Date(NA))
   
-  max_date <- cdm$observation_period %>%
-    filter(person_id %in% personIds) %>%
-    summarise(max_date = max(observation_period_end_date, na.rm = TRUE)) %>%
-    pull(max_date) %>%
-    first() # Get the single value
+  processedPersonIds <- unique(as.numeric(personIds))
   
-  return(max_date)
+  individualDates <- cdm$observation_period %>%
+    filter(person_id %in% processedPersonIds) %>%
+    group_by(person_id) %>%
+    summarise(max_date = max(observation_period_end_date, na.rm = TRUE), .groups = "drop") %>%
+    collect()
+  
+  return(individualDates)
 }

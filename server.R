@@ -425,7 +425,7 @@ server <- function(input, output, session) {
         is_case = if_else(person_id %in% casePersonIds, 1, 0)
       )
     
-    # 2. Execute matching using matchit within a tryCatch for error handling.
+    # 2. Execute matching using matchit
     matchResult <- tryCatch({
       matchit(
         is_case ~ year_of_birth + gender_concept_id, # Matching formula
@@ -497,28 +497,27 @@ server <- function(input, output, session) {
       ungroup() %>%
       filter(!is.na(index_date)) # Remove rows where index date is NA (essential)
     
-    # --- Determine Censor Date ---
-    # 9. Fetch the latest observation end date for the aligned cohort using tryCatch.
-    censorDate <- tryCatch({
-      getMaxObservationEndDate(cdm, matchedPersonIds)
-    }, error = function(e) {
-      # Notify user and use fallback if fetching fails.
-      showNotification(paste("Error fetching censor date for Start ID:", startId, ". Using fallback."), type="warning", duration=5)
-      return(Sys.Date())
-    })
-    # Use fallback if the fetched date is invalid.
-    if (is.na(censorDate) || !inherits(censorDate, "Date")) {
-      censorDate <- Sys.Date()
-    }
     
-    # 10. Return the aligned data and the censor date.
-    return(list(alignedData = matchedDataAligned, censorDate = censorDate))
+    # --- Determine Censor Dates for people ---
+    
+    alignedPersonIds <- unique(matchedDataAligned$person_id)
+    
+    # 9. Get max observation date for each person
+    individualMaxObsDates <- getMaxObservationDates(cdm = cdm, personIds = alignedPersonIds)
+    
+    # 10. Join individual max observation dates back to the aligned data.
+    matchedDataWithCensor <- matchedDataAligned %>% 
+      inner_join(individualMaxObsDates, by = "person_id") %>%
+      rename(censor_date = max_date)
+      
+    
+    return(matchedDataWithCensor)
   }
   
   
   # Helper Function: Calculate survival time and event status.
   # Computes time_to_event and event indicator for a specific target condition.
-  calculateSurvival <- function(alignedData, targetDatesForPerson, targetId, censorDate, indexDateCol = "index_date", groupCol = "is_case") {
+  calculateSurvival <- function(alignedData, targetDatesForPerson, targetId, censorDateCol = "censor_date", indexDateCol = "index_date", groupCol = "is_case") {
     
     # 1. Filter the fetched target dates for the specific targetId of interest.
     currentTargetDates <- targetDatesForPerson %>%
@@ -532,8 +531,8 @@ server <- function(input, output, session) {
       mutate(
         # Event = 1 if target exists and is after index date
         event = if_else(!is.na(target_date) & target_date > .data[[indexDateCol]], 1, 0),
-        # Follow-up ends at event or censoring
-        final_date_raw = if_else(event == 1, target_date, censorDate),
+        # If event occurred, final date is event date. Otherwise, it's censor date.
+        final_date_raw = if_else(event == 1, target_date, .data[[censorDateCol]]),
         # Ensure follow-up doesn't end before index date
         final_date = pmax(final_date_raw, .data[[indexDateCol]], na.rm = TRUE),
         # Calculate time difference in days (non-negative)
@@ -579,31 +578,27 @@ server <- function(input, output, session) {
       # Code proceeds assuming matchedData is valid if performMatching didn't return NULL.
       
       # 5. Fetch dates and align index dates for the matched cohort.
-      dateInfo <- fetchAndAlignDates(matchedData, cdm, startId)
-      # Code proceeds assuming dateInfo is valid if fetchAndAlignDates didn't return NULL.
+      alignedDataWithDates <- fetchAndAlignDates(matchedData, cdm, startId)
       
-      # 6. Extract results from date fetching/alignment (will error if dateInfo is NULL).
-      alignedData <- dateInfo$alignedData
-      censorDate <- dateInfo$censorDate
-      alignedPersonIds <- unique(alignedData$person_id)
+      # 6. Extract person ids from date fetching/alignment
+      alignedPersonIds <- unique(alignedDataWithDates$person_id)
       
-      # 7. Fetch all relevant target condition dates for the aligned cohort (with error handling).
+      # 7. Fetch all relevant target condition dates for the aligned cohort
       allTargetDatesForMatched <- tryCatch({
         getFirstConditionDatesForPersons(cdm, personIds = alignedPersonIds, conceptIds = input$targetConditionId)
       }, error = function(e) {
         showNotification(paste("Error fetching target dates for matched cohort (Start ID:", startId, "):", e$message), type = "error")
         return(NULL) # Skip this startId if fetch fails
       })
-      # Code proceeds assuming allTargetDatesForMatched is valid if tryCatch didn't return NULL.
       
       # --- Inner Loop: Process each selected Target Condition for the current Start Condition ---
       resultsListTarget <- lapply(input$targetConditionId, function(targetId) {
         # 8. Calculate survival variables for the current start-target pair.
         survData <- calculateSurvival(
-          alignedData = alignedData,
+          alignedData = alignedDataWithDates,
           targetDatesForPerson = allTargetDatesForMatched,
           targetId = targetId,
-          censorDate = censorDate,
+          censorDateCol = "censor_date",
           indexDateCol = "index_date",
           groupCol = "is_case"
         )
@@ -671,7 +666,7 @@ server <- function(input, output, session) {
         # Fit a KM model using the group variable (With vs. Without start condition)
         kmFit <- survfit(Surv(time_to_event, event) ~ group, data = survData)
         
-        # Get labels for the plot (customize as needed)
+        # Get labels for the plot
         startLabel <- allOccurredConditions$concept_name_id[allOccurredConditions$concept_id == input$startConditionId[i]]
         targetLabel <- allOccurredConditions$concept_name_id[allOccurredConditions$concept_id == input$targetConditionId[j]]
         pairLabel <- paste0("Start: ", startLabel, " | Target: ", targetLabel)
