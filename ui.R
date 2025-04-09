@@ -97,36 +97,6 @@ ui <- fluidPage(
                  # UI Output container where the server will dynamically generate the grid of plots
                  uiOutput("kmPlotsUI")
         ),
-        tabPanel("Conditions Sankey",
-                 sankeyNetworkOutput("sankeyPlotCondition"),
-                 div(style = "min-height: 300px",
-                     selectizeInput(
-                       "hiddenConditions",
-                       "Conditions to hide in Sankey Plot:",
-                       choices = NULL,
-                       multiple = TRUE,
-                       selected = NULL,
-                       options = list(
-                         plugins = list("remove_button"),
-                         placeholder = "Select conditions to hide")
-                     )
-                 )
-        ),
-        tabPanel("Procedures Sankey",
-                 sankeyNetworkOutput("sankeyPlotProcedure"),
-                 div(style = "min-height: 300px",
-                     selectizeInput(
-                       "hiddenProcedures",
-                       "Procedures to hide in Sankey Plot:",
-                       choices = NULL,
-                       multiple = TRUE,
-                       selected = NULL,
-                       options = list(
-                         plugins = list("remove_button"),
-                         placeholder = "Select procedures to hide")
-                     )
-                 )
-        ),
         tabPanel("Demographic overview", 
                  fluidRow(
                    column(6, uiOutput("startPyramidsUI")),
