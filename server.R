@@ -13,7 +13,6 @@ library(networkD3)
 library(survival)
 library(survminer)
 library(dplyr)
-library(MatchIt)
 
 # Define server logic 
 server <- function(input, output, session) {
@@ -409,361 +408,667 @@ server <- function(input, output, session) {
   
   
   
-  
   #################### KM PLOTS FOR DEFINED TARGET OUTCOMES ####################
   
-  # Demographic data used for matching a control group
-  demographics <- getAllGendersAndBirthyears(cdm)
   
-  
-  # Helper Function: Performs propensity score matching.
-  # Attempts to match cases (start condition) to controls based on covariates.
-  performMatching <- function(population, casePersonIds, startId) {
-    # 1. Prepare data for matching: add a binary indicator for case status.
-    matchDataBase <- population %>%
-      mutate(
-        is_case = if_else(person_id %in% casePersonIds, 1, 0)
-      )
-    
-    # 2. Execute matching using matchit
-    matchResult <- tryCatch({
-      matchit(
-        is_case ~ year_of_birth + gender_concept_id, # Matching formula
-        data = matchDataBase,                               # Input data
-        method = "nearest",                                  # Matching algorithm
-        ratio = 2                                            # Target control:case ratio
-      )
-    }, error = function(e) {
-      # Notify user and log warning if matching algorithm fails.
-      showNotification(paste("Matching failed for Start ID:", startId), type="warning", duration=5)
-      warning(paste("Matching failed for Start ID:", startId, "-", e$message))
-      # Return NULL to indicate matching failure.
-      return(NULL)
-    })
-    
-    # 3. Extract the matched dataset. Assumes matchResult is valid.
-    return(match.data(matchResult))
-  }
-  
-  
-  # Helper Function: Fetches dates and aligns index dates for the matched cohort.
-  # Retrieves start dates for cases, filters pairs, aligns index dates, gets censor date.
-  fetchAndAlignDates <- function(matchedData, cdm, startId) {
-    # 1. Get IDs of all matched individuals and just the cases.
-    # Assumes matchedData is a valid data frame from performMatching.
-    matchedPersonIds <- unique(matchedData$person_id)
-    casePersonIds <- matchedData %>% filter(is_case == 1) %>% pull(person_id) %>% unique()
-    
-    # 2. Fetch start condition dates for cases using tryCatch.
-    startCondDates <- tryCatch({
-      getFirstConditionDatesForPersons(cdm, personIds = casePersonIds, conceptIds = startId) %>%
-        rename(start_cond_date = condition_start_date) %>%
-        select(person_id, start_cond_date)
-    }, error = function(e) {
-      # Notify user if fetching start dates fails.
-      showNotification(paste("Error fetching start dates for Start ID:", startId), type="error", duration=5)
-      # Return NULL to indicate failure.
-      return(NULL)
-    })
-    
-    # --- Filtering and Alignment ---
-    # Steps below assume startCondDates is a valid data frame.
-    
-    # 3. Identify cases for whom a start date was found.
-    casesWithDates <- startCondDates %>% distinct(person_id)
-    # 4. Find the matched sets (subclasses) where the case has a start date.
-    subclassesToKeep <- matchedData %>%
-      filter(is_case == 1) %>%
-      semi_join(casesWithDates, by = "person_id") %>%
-      distinct(subclass)
-    
-    # 5. Filter the matched data to only include these complete subclasses.
-    matchedDataFiltered <- matchedData %>%
-      semi_join(subclassesToKeep, by = "subclass")
-    
-    # 6. Update the list of person IDs after filtering.
-    matchedPersonIds <- unique(matchedDataFiltered$person_id)
-    
-    # 7. Join the start dates back to the filtered matched data.
-    matchedDataWithStart <- matchedDataFiltered %>%
-      left_join(startCondDates, by = "person_id")
-    
-    # 8. Align index dates: Set index_date for controls to their matched case's start_cond_date.
-    matchedDataAligned <- matchedDataWithStart %>%
-      group_by(subclass) %>% # Process by matched set
-      mutate(
-        case_start_date = first(na.omit(start_cond_date[is_case == 1])), # Get case's start date
-        index_date = case_start_date                                            # Apply to all in set
-      ) %>%
-      ungroup() %>%
-      filter(!is.na(index_date)) # Remove rows where index date is NA (essential)
-    
-    
-    # --- Determine Censor Dates for people ---
-    
-    alignedPersonIds <- unique(matchedDataAligned$person_id)
-    
-    # 9. Get max observation date for each person
-    individualMaxObsDates <- getMaxObservationDates(cdm = cdm, personIds = alignedPersonIds)
-    
-    # 10. Join individual max observation dates back to the aligned data.
-    matchedDataWithCensor <- matchedDataAligned %>% 
-      inner_join(individualMaxObsDates, by = "person_id") %>%
-      rename(censor_date = max_date)
-      
-    
-    return(matchedDataWithCensor)
-  }
-  
-  
-  # Helper Function: Calculate survival time and event status.
-  # Computes time_to_event and event indicator for a specific target condition.
-  calculateSurvival <- function(alignedData, targetDatesForPerson, targetId, censorDateCol = "censor_date", indexDateCol = "index_date", groupCol = "is_case") {
-    
-    # 1. Filter the fetched target dates for the specific targetId of interest.
-    currentTargetDates <- targetDatesForPerson %>%
-      filter(concept_id == targetId) %>%
-      select(person_id, target_date = condition_start_date)
-    
-    # 2. Join target dates and calculate survival variables.
-    # Assumes alignedData is a valid data frame.
-    survData <- alignedData %>%
-      left_join(currentTargetDates, by = "person_id") %>% # Add target dates
-      mutate(
-        # Event = 1 if target exists and is after index date
-        event = if_else(!is.na(target_date) & target_date > .data[[indexDateCol]], 1, 0),
-        # If event occurred, final date is event date. Otherwise, it's censor date.
-        final_date_raw = if_else(event == 1, target_date, .data[[censorDateCol]]),
-        # Ensure follow-up doesn't end before index date
-        final_date = pmax(final_date_raw, .data[[indexDateCol]], na.rm = TRUE),
-        # Calculate time difference in days (non-negative)
-        time_to_event = pmax(0, as.numeric(difftime(final_date, .data[[indexDateCol]], units = "days"))),
-        # Create factor for case/control group
-        group = factor(.data[[groupCol]],
-                       levels = c(0, 1),
-                       labels = c("Control (Matched)", "Case (Start Cond.)"))
-      ) %>%
-      # Select columns needed for survival analysis
-      select(person_id, time_to_event, event, group, subclass, index_date, target_date, final_date)
-    
-    # 3. Return the resulting data frame with survival variables.
-    return(survData)
-  }
-  
-  
-  # --- Main Reactive Function to Generate Survival Data ---
-  # Orchestrates the entire process from matching to final survival data generation.
-  kmSurvivalDataPairs <- eventReactive(input$getData, {
+  # --- Function: Calculate Matched Survival Data using Incidence Density Matching ---
+  calculateMatchedSurvivalData <- function(selectedStartIds, selectedTargetIds, cdm) {
     # 1. Ensure required inputs and objects are available.
-    req(input$startConditionId, input$targetConditionId, nrow(demographics) > 0, cdm)
+    req(selectedStartIds, selectedTargetIds, cdm)
     
-    # 2. Prepare the base demographic data for matching.
-    populationBase <- demographics %>%
-      filter(!is.na(gender_concept_id) & !is.na(year_of_birth)) %>%
-      mutate(gender_concept_id = factor(gender_concept_id)) %>%
-      select(person_id, year_of_birth, gender_concept_id)
+    showNotification("Starting Incidence Density Matching for selected pairs...", duration = 10, type="message", id="proc_main")
     
-    # --- Outer Loop: Process each selected Start Condition ---
-    resultsListStart <- lapply(input$startConditionId, function(startId) {
-      
-      # 3. Fetch persons having the current start condition (with error handling).
-      startCasePersons <- tryCatch({
-        getPeopleWithCondition(cdm, startId)
-      }, error = function(e) {
-        showNotification(paste("Error fetching persons for start condition", startId, ":", e$message), type = "error")
-        return(NULL) # Skip this startId if fetch fails
-      })
-      # Code proceeds assuming startCasePersons is valid if tryCatch didn't return NULL.
-      
-      # 4. Perform matching for the current start condition.
-      matchedData <- performMatching(populationBase, startCasePersons$person_id, startId)
-      # Code proceeds assuming matchedData is valid if performMatching didn't return NULL.
-      
-      # 5. Fetch dates and align index dates for the matched cohort.
-      alignedDataWithDates <- fetchAndAlignDates(matchedData, cdm, startId)
-      
-      # 6. Extract person ids from date fetching/alignment
-      alignedPersonIds <- unique(alignedDataWithDates$person_id)
-      
-      # 7. Fetch all relevant target condition dates for the aligned cohort
-      allTargetDatesForMatched <- tryCatch({
-        getFirstConditionDatesForPersons(cdm, personIds = alignedPersonIds, conceptIds = input$targetConditionId)
-      }, error = function(e) {
-        showNotification(paste("Error fetching target dates for matched cohort (Start ID:", startId, "):", e$message), type = "error")
-        return(NULL) # Skip this startId if fetch fails
-      })
-      
-      # --- Inner Loop: Process each selected Target Condition for the current Start Condition ---
-      resultsListTarget <- lapply(input$targetConditionId, function(targetId) {
-        # 8. Calculate survival variables for the current start-target pair.
-        survData <- calculateSurvival(
-          alignedData = alignedDataWithDates,
-          targetDatesForPerson = allTargetDatesForMatched,
-          targetId = targetId,
-          censorDateCol = "censor_date",
-          indexDateCol = "index_date",
-          groupCol = "is_case"
-        )
-        
-        # 9. Add start/target IDs to the survival data if it was created successfully.
-        if (!is.null(survData)) {
-          survData$start_condition_id <- startId
-          survData$target_condition_id <- targetId
-        }
-        # Return the result (data frame or NULL).
-        return(survData)
-      }) # End inner lapply
-      
-      # 10. Attempt to name the inner list elements by target ID.
-      if (length(resultsListTarget) > 0) {
-        tryCatch({ # Use tryCatch as naming might fail if list contains NULLs
-          valid_results <- resultsListTarget[!sapply(resultsListTarget, is.null)]
-          if(length(valid_results)>0){
-            names(resultsListTarget) <- sapply(valid_results, function(df) unique(df$target_condition_id))
-          }
-        }, error = function(e) { }) # Ignore naming errors
-      }
-      
-      # 11. Return the list of results for the current start ID.
-      return(resultsListTarget)
-      
-    }) # End outer lapply
+    # --- Configuration ---
+    matchRatio <- 2 # Number of controls per case
     
-    # 12. Assign the results to the final list variable.
-    # This list may contain NULLs where processing failed for a start ID.
-    finalNestedList <- resultsListStart
+    # --- 2. Data Fetching ---
+    # Fetch base demographic data for all potential persons
+    demographicsBase <- tryCatch({
+      getAllGendersAndBirthyears(cdm) %>%
+        filter(!is.na(gender_concept_id) & !is.na(year_of_birth))
+    }, error = function(e) {
+      showNotification(paste("Error fetching demographics:", e$message), type = "error")
+      return(NULL)
+    })
+    # Check if fetching demographics failed or returned empty
+    if (is.null(demographicsBase) || nrow(demographicsBase) == 0) {
+      removeNotification(id="proc_main")
+      return(NULL)
+    }
+    # Get the list of persons to use for subsequent queries
+    basePersonIds <- demographicsBase$person_id
     
-    # 13. Attempt to name the outer list elements by start ID.
-    if (length(finalNestedList) > 0) {
-      tryCatch({ # Use tryCatch as naming might fail
-        # Identify valid list elements for naming
-        valid_start_results <- finalNestedList[!sapply(finalNestedList, function(l) !is.list(l) || length(l) == 0 || is.null(l[[1]])) ]
-        if(length(valid_start_results)>0){
-          # Extract start IDs from the first valid data frame within each valid inner list
-          startIdsInList <- sapply(valid_start_results, function(innerList) {
-            unique(innerList[[1]]$start_condition_id)
-          })
-          # Assign names
-          names(finalNestedList) <- as.character(na.omit(startIdsInList))
-        }
-      }, error = function(e) { }) # Ignore naming errors
+    # Fetch observation periods for the base cohort
+    obsPeriods <- tryCatch({
+      getObservationPeriods(cdm, personIds = basePersonIds)
+      # column names: person_id, obs_start_date, obs_end_date
+    }, error = function(e) {
+      showNotification(paste("Error fetching observation periods:", e$message), type = "error")
+      removeNotification(id="proc_main")
+      return(NULL)
+    })
+    # Check if fetching observation periods failed or returned empty
+    if (is.null(obsPeriods) || nrow(obsPeriods) == 0) {
+      removeNotification(id="proc_main")
+      return(NULL)
     }
     
-    # 14. Return the final nested list structure.
-    # Structure: List (named by startId) -> List (named by targetId) -> survData (data.frame)
-    return(finalNestedList)
-  })
+    # Fetch ALL relevant condition dates (start & target) for the base cohort
+    allConceptIdsToFetch <- unique(c(selectedStartIds, selectedTargetIds))
+    allConditionDates <- tryCatch({
+      getFirstConditionDatesForPersons(cdm, personIds = basePersonIds, conceptIds = allConceptIdsToFetch) %>%
+        # column names: person_id, concept_id, condition_start_date
+        # Remove rows where min(NA) resulted in Inf (no date found)
+        filter(!is.infinite(condition_start_date))
+    }, error = function(e) {
+      showNotification(paste("Error fetching condition dates:", e$message), type = "error")
+      removeNotification(id="proc_main")
+      return(NULL)
+    })
+    
+    # Check if any condition dates were found
+    if (is.null(allConditionDates) || nrow(allConditionDates) == 0) {
+      showNotification("No condition dates found for the selected concepts.", type = "warning")
+      removeNotification(id="proc_main")
+      return(NULL)
+    }
+    
+    # --- 3. Prepare Base Cohort Data (Joining everything) ---
+    # Combine demographics, observation periods, and all fetched condition dates
+    cohortBase <- demographicsBase %>%
+      inner_join(obsPeriods, by = "person_id") %>%
+      # Ensure observation period is valid
+      filter(obs_end_date > obs_start_date) %>%
+      # Join ALL condition dates (long format is useful for filtering later)
+      left_join(allConditionDates, by = "person_id")
+    
+    # Check if the base cohort is valid after joins
+    if (nrow(cohortBase) == 0) {
+      showNotification("Cohort base is empty after joining observation periods.", type = "warning")
+      removeNotification(id="proc_main")
+      return(NULL)
+    }
+    # Note: cohortBase now potentially has multiple rows per person if they have dates for multiple concepts.
+    
+    # --- 4. Initialize Results List ---
+    # This list will store the final survival data for each valid start-target pair
+    resultsList <- list()
+    
+    # --- 5. Outer Loop: Iterate through each selected Start Condition ---
+    for (startId in selectedStartIds) {
+      # Use startId in notifications
+      startIdStr <- as.character(startId)
+      showNotification(paste("Processing Start ID:", startIdStr), duration = NA, id = paste0("proc_start_", startIdStr))
+      
+      # --- 5a. Identify Cases for the CURRENT startId ---
+      # Cases are persons with the start condition occurring within their observation period
+      cases <- cohortBase %>%
+        # Filter rows corresponding to the current start condition ID and ensure the date is valid
+        filter(concept_id == startId & !is.na(condition_start_date)) %>%
+        # Ensure the condition occurs within the person's observation period
+        filter(condition_start_date >= obs_start_date & condition_start_date <= obs_end_date) %>%
+        # Select relevant information for the case and define the index date
+        select(case_id = person_id,
+               index_date = condition_start_date, # The date the start condition occurred is the index date for matching
+               year_of_birth,
+               gender_concept_id) %>%
+        # Ensure unique case events (if a person could have multiple obs periods)
+        distinct(case_id, index_date, .keep_all = TRUE)
+      
+      # Check if any cases were found for this start condition
+      if (nrow(cases) == 0) {
+        showNotification(paste("No valid cases found for Start ID:", startIdStr, "within observation periods."), type = "warning", duration = 5)
+        removeNotification(id = paste0("proc_start_", startIdStr))
+        next # Skip to the next startId in the outer loop
+      }
+      showNotification(paste("Identified", nrow(cases), "cases for Start ID:", startIdStr), type="message", duration = 5)
+      
+      # --- 5b. Prepare Potential Controls Pool Data (for efficient lookup) ---
+      # This pool contains necessary info (demographics, obs period, date of CURRENT start condition if any)
+      # for everyone, needed to define the risk set quickly inside the case loop.
+      
+      # Get dates ONLY for the current start condition
+      startCondDatesPool <- allConditionDates %>%
+        filter(concept_id == startId) %>%
+        select(person_id, start_cond_date = condition_start_date)
+      
+      # Create the pool by joining demographics, observation periods, and the specific start condition date
+      potentialControlsPool <- demographicsBase %>%
+        inner_join(obsPeriods, by="person_id") %>%
+        filter(obs_end_date > obs_start_date) %>%
+        select(person_id, year_of_birth, gender_concept_id, obs_start_date, obs_end_date) %>%
+        # Join the date of the current start condition (will be NA if person never had it)
+        left_join(startCondDatesPool, by="person_id")
+      
+      
+      # --- 5c. Loop Through Cases and Match (Incidence Density Matching) ---
+      # This list will hold the matched sets (dataframes) for the current startId
+      matchedSetsList <- list()
+      nCasesProcessed <- 0 # Counter for cases looped through
+      nCasesMatched <- 0 # Counter for cases for whom controls were found
+      
+      totalCases <- nrow(cases)
+      # Iterate through each identified case for the current startId
+      for (i in 1:totalCases) {
+        # Get details for the current case
+        currentCase <- cases[i, ]
+        caseId <- currentCase$case_id
+        caseIndexDate <- currentCase$index_date
+        caseBirthYear <- currentCase$year_of_birth
+        caseGender <- currentCase$gender_concept_id
+        # Calculate the case's age in years at the index date for matching
+        caseAttainedAgeYear <- year(caseIndexDate) - caseBirthYear
+        nCasesProcessed <- nCasesProcessed + 1
+        
+        # Define the Risk Set: Find potential controls eligible at the case's index date
+        riskSet <- potentialControlsPool %>%
+          filter(
+            person_id != caseId, # Exclude the case themselves
+            # Ensure potential controls are observed at the case's index date
+            obs_start_date <= caseIndexDate,
+            obs_end_date >= caseIndexDate,
+            # Crucial: Ensure controls do NOT have the start condition ON OR BEFORE the index date
+            is.na(start_cond_date) | start_cond_date > caseIndexDate
+          )
+        
+        matchedControlsDf <- NULL # Initialize dataframe for matched controls
+        
+        # Proceed only if there are potential controls in the risk set
+        if (nrow(riskSet) > 0) {
+          # Calculate attained age for potential controls in the risk set at the case's index date
+          riskSetWithAge <- riskSet %>%
+            mutate(
+              attained_age_year = year(caseIndexDate) - year_of_birth
+            )
+          
+          # Perform Matching: Find controls matching the case (within the risk set)
+          # Example: Exact match on gender, nearest neighbor on attained age
+          matchedControlsDf <- riskSetWithAge %>%
+            filter(gender_concept_id == caseGender) %>% # Match on gender
+            mutate(age_diff = abs(attained_age_year - caseAttainedAgeYear)) %>% # Calculate age difference
+            arrange(age_diff) %>% # Find controls with the smallest age difference
+            slice_head(n = matchRatio) # Select the desired number of controls
+        }
+        
+        # Store the matched set (case + selected controls) if controls were successfully found
+        if (!is.null(matchedControlsDf) && nrow(matchedControlsDf) > 0) {
+          nCasesMatched <- nCasesMatched + 1
+          # Create a dataframe for this matched set
+          setData <- tibble(
+            person_id = c(caseId, matchedControlsDf$person_id),
+            is_case = c(1, rep(0, nrow(matchedControlsDf))), # 1 for case, 0 for controls
+            index_date = caseIndexDate, # Assign the case's index date to everyone in the set
+            set_id = i # Use the case loop index as a unique identifier for this set
+          )
+          # Store this set's dataframe in the list
+          matchedSetsList[[i]] <- setData
+        } else {
+          # Store NULL if no controls were found for this case
+          matchedSetsList[[i]] <- NULL
+        }
+        
+        # Update progress notification periodically
+        if (i %% 50 == 0 || i == totalCases) {
+          currentProgress <- round((i / totalCases) * 100)
+          showNotification(
+            paste0("Matching for Start ID: ", startIdStr, " (", currentProgress,"%) - Matched ", nCasesMatched, "/", i),
+            duration = NULL, # Keep showing until next update
+            id = paste0("match_prog_", startIdStr),
+            type = "message"
+          )
+        }
+      } # End loop iterating through cases for the current startId
+      
+      # Remove the progress notification for this startId
+      removeNotification(id = paste0("match_prog_", startIdStr))
+      
+      # Filter out the NULL entries where no match was found
+      matchedSetsList <- matchedSetsList[!sapply(matchedSetsList, is.null)]
+      
+      # Check if any matched sets were created for this startId
+      if (length(matchedSetsList) == 0) {
+        showNotification(paste("Matching complete, but no matched sets could be created for Start ID:", startIdStr), type = "warning", duration = 5)
+        removeNotification(id = paste0("proc_start_", startIdStr))
+        next # Skip to the next startId
+      }
+      showNotification(paste("Matching complete for Start ID:", startIdStr, ". Created sets for", nCasesMatched, "out of", nCasesProcessed, "cases."), type="message", duration = 5)
+      
+      # Consolidate all matched sets for the CURRENT startId into a single dataframe
+      matchedDataFinal <- bind_rows(matchedSetsList)
+      
+      # --- 6. Inner Loop: Calculate Survival for each Target Condition ---
+      # Prepare base data for survival calculation by joining matched data with observation periods
+      # This ensures we have the correct obs_start_date and obs_end_date for each person in the matched sets
+      survivalInputBase <- matchedDataFinal %>%
+        select(person_id, set_id, is_case, index_date) %>% # Keep matching info
+        # Join back to get observation periods for the matched individuals
+        inner_join(select(potentialControlsPool, person_id, obs_start_date, obs_end_date), by = "person_id") %>%
+        distinct() # Ensure unique person-set combinations
+      
+      
+      # Iterate through each selected target condition ID
+      for (targetId in selectedTargetIds) {
+        targetIdStr <- as.character(targetId)
+        # Show notification for survival calculation step
+        showNotification(paste("Calculating survival for Start:", startIdStr, "Target:", targetIdStr), duration = NA, id = paste0("proc_surv_", startIdStr, "_", targetIdStr))
+        
+        # Get the dates for the CURRENT target condition from the pre-fetched data
+        targetDatesCurrent <- allConditionDates %>%
+          filter(concept_id == targetId) %>%
+          select(person_id, target_cond_date = condition_start_date)
+        
+        # Join the target dates and calculate survival outcomes (time-to-event, status)
+        survivalDataCurrentPair <- survivalInputBase %>%
+          # Add the date of the target condition (if any) for each person
+          left_join(targetDatesCurrent, by = "person_id") %>%
+          mutate(
+            # Determine the date of the outcome event, must be AFTER index date and within observation
+            event_date = if_else(!is.na(target_cond_date) & target_cond_date > index_date & target_cond_date <= obs_end_date,
+                                 target_cond_date,
+                                 NA_Date_),
+            
+            # Determine the end of follow-up: observation end or event date, whichever is earlier
+            study_exit_date = pmin(obs_end_date, event_date, na.rm = TRUE),
+            
+            # Ensure follow-up does not end before it starts (handles edge cases)
+            study_exit_date = pmax(study_exit_date, index_date),
+            
+            # Determine event status: 1 if follow-up ended due to the target condition, 0 otherwise (censored)
+            event_status = if_else(!is.na(event_date) & event_date == study_exit_date, 1, 0),
+            
+            # Calculate follow-up time in days from index date to exit date
+            time_to_event = as.numeric(difftime(study_exit_date, index_date, units = "days"))
+          ) %>%
+          # Filter out any rows with invalid follow-up time (should be >= 0)
+          filter(time_to_event >= 0) %>%
+          # Select the final columns needed for survival analysis functions
+          select(person_id, set_id, is_case, index_date, study_exit_date, time_to_event, event_status)
+        
+        # Check if any valid survival data was generated for this pair
+        if (nrow(survivalDataCurrentPair) > 0) {
+          # Store the results for this specific start-target pair in the main results list
+          uniquePairKey <- paste0("pair_", startIdStr, "_", targetIdStr)
+          # Get concept names for labels
+          startLabel <- allOccurredConditions$concept_name_id[allOccurredConditions$concept_id == startId]
+          targetLabel <- allOccurredConditions$concept_name_id[allOccurredConditions$concept_id == targetId]
+          
+          # Store the data and metadata in the list
+          resultsList[[uniquePairKey]] <- list(
+            survivalData = survivalDataCurrentPair,
+            startConditionId = startId,
+            targetConditionId = targetId,
+            startConditionLabel = startLabel,
+            targetConditionLabel = targetLabel,
+            nCasesInMatching = nrow(cases), # Total cases identified for this startId
+            nCasesMatched = nCasesMatched, # Cases for whom at least one control was found
+            nControlsMatched = sum(survivalDataCurrentPair$is_case == 0), # Total controls in final analysis data for this pair
+            nTotalPersonsInAnalysis = nrow(survivalDataCurrentPair) # Total rows in analysis data for this pair
+          )
+          showNotification(paste("Survival calculated for Start:", startIdStr, "Target:", targetIdStr), duration = 3, type = "message")
+        } else {
+          # Notify if no valid survival data resulted for this pair
+          showNotification(paste("No valid survival data for Start:", startIdStr, "Target:", targetIdStr), type = "warning", duration = 5)
+        }
+        # Remove the survival calculation notification for this pair
+        removeNotification(id = paste0("proc_surv_", startIdStr, "_", targetIdStr))
+        
+      } # End inner loop iterating through targetIds
+      # Remove the notification for the current startId processing
+      removeNotification(id = paste0("proc_start_", startIdStr))
+      
+    } # End outer loop iterating through startIds
+    
+    # --- 7. Return Final Results List ---
+    # Clean up the main processing notification
+    removeNotification(id="proc_main")
+    # Check if any results were generated at all
+    if (length(resultsList) == 0) {
+      showNotification("Processing complete, but no results were generated for any pair.", type="error", duration = 10)
+      return(NULL) # Return NULL if the list is empty
+    } else {
+      showNotification("All processing complete.", type="message", duration = 5)
+      
+      # Return the list containing results for all processed pairs
+      return(resultsList)
+    }
+  }
   
   
-  # Generate KM plots and risk tables for each start-target pair:
-  kmPlotsPairs <- eventReactive(kmSurvivalDataPairs(), {
-    req(kmSurvivalDataPairs())
+  # Function: Generate KM plots, risk tables and p-value info for each start-target pair:
+  generateKmPlotObjects <- function(matchedSurvivalData) {
+    req(matchedSurvivalData)
+    
     # Create an empty list to store plots and tables. Use names that indicate the pair.
     plotsList <- list()
     
-    for (i in seq_along(input$startConditionId)) {
-      for (j in seq_along(input$targetConditionId)) {
-        # Retrieve the survival data for this pair.
-        survData <- kmSurvivalDataPairs()[[i]][[j]]
-        
-        # Fit a KM model using the group variable (With vs. Without start condition)
-        kmFit <- survfit(Surv(time_to_event, event) ~ group, data = survData)
-        
-        # Get labels for the plot
-        startLabel <- allOccurredConditions$concept_name_id[allOccurredConditions$concept_id == input$startConditionId[i]]
-        targetLabel <- allOccurredConditions$concept_name_id[allOccurredConditions$concept_id == input$targetConditionId[j]]
-        pairLabel <- paste0("Start: ", startLabel, " | Outcome: ", targetLabel)
-        uniquePairKey <- paste0("pair_", input$startConditionId[i], "_", input$targetConditionId[j])
-        
-        ggsurvObject <- ggsurvplot(
-          kmFit,
-          data = survData,
-          conf.int = TRUE,
-          pval = TRUE,
-          risk.table = TRUE,
-          risk.table.height = 0.25,
-          legend.title = "Group",
-          title = pairLabel,
-          xlab = "Days from index date",
-          ylab = "Target-free probability"
+    # Loop through each start-target pair result stored in the input list
+    for (pairKey in names(matchedSurvivalData)) {
+      # Extract the result list for the current pair
+      pairResult <- matchedSurvivalData[[pairKey]]
+      # Extract the survival dataframe for this pair
+      survData <- pairResult$survivalData
+      
+      # Create a factor for the grouping variable (Case vs Control)
+      # This provides clearer labels for the plot legend.
+      survData <- survData %>%
+        mutate(group = factor(is_case,
+                              levels = c(0, 1),
+                              labels = c("Control (Matched)", "Case (Start Cond.)")))
+      
+      # Fit a KM model using the group variable (With vs. Without start condition)
+      kmFit <- survfit(Surv(time_to_event, event_status) ~ group, data = survData)
+      
+      # Calculate the p-value for storing it alongside the plots
+      pValueInfo <- surv_pvalue(kmFit, data = survData)
+      
+      # Construct the plot title using labels from the results list
+      pairLabel <- paste0("Start: ", pairResult$startConditionLabel,
+                          " | Outcome: ", pairResult$targetConditionLabel)
+      
+      ggsurvObject <- ggsurvplot(
+        kmFit,
+        data = survData,
+        conf.int = TRUE,
+        pval = TRUE,
+        risk.table = TRUE,
+        risk.table.height = 0.25,
+        legend.title = "Group",
+        title = pairLabel,
+        xlab = "Days from index date",
+        ylab = "Target-free probability"
+      )
+      
+      # Store the entire ggsurvplot list object (plot + table)
+      # and the p-value
+      if (!is.null(ggsurvObject)) {
+        plotsList[[pairKey]] <- list(
+          plotObject = ggsurvObject,
+          pValueInfo = pValueInfo
         )
-        
-        # Store the entire ggsurvplot list object (plot + table)
-        if (!is.null(ggsurvObject)) {
-          plotsList[[uniquePairKey]] <- ggsurvObject
-        }
       }
     }
-
     plotsList
+    
+  }
+  
+  
+  # --- KM Computation, Plot Generation, and saving (Triggered by Button) ---
+  observeEvent(input$getData, {
+    req(input$startConditionId, input$targetConditionId, cdm) 
+    req(input$saveFileName, cancelOutput = TRUE) 
+    
+    # --- Filename Handling ---
+    safeFileName <- gsub("[^a-zA-Z0-9_\\-]", "_", input$saveFileName) 
+    safeFileName <- tools::file_path_sans_ext(safeFileName) 
+    if (nchar(safeFileName) == 0) { showNotification("Please enter a valid file name.", type="error"); return() }
+    savePath <- file.path(resultsDir, paste0(safeFileName, ".rds"))
+    if (file.exists(savePath)) { showNotification(paste("File", basename(savePath), "already exists. Overwriting."), type="warning", duration = 5) }
+    
+    # --- Trigger Calculation ---
+    resultsData <- calculateMatchedSurvivalData(input$startConditionId, input$targetConditionId, cdm) 
+    if (is.null(resultsData)) { showNotification("KM analysis failed during data preparation. Nothing saved.", type="error"); return() }
+    
+    # This returns a list containing plotObject and pvalue for each pair
+    plotsAndPvalsData <- generateKmPlotObjects(resultsData) 
+    if (is.null(plotsAndPvalsData)) { showNotification("KM analysis completed data preparation, but failed to generate plots. Nothing saved.", type="warning"); return() }
+    
+    # --- Create Summary Data Frame ---
+    summaryList <- list()
+    for(pairKey in names(resultsData)) {
+      pairResult <- resultsData[[pairKey]]
+
+      # Get the p-value
+      pValue <- plotsAndPvalsData[[pairKey]]$pValueInfo$pval
+      
+      summaryList[[pairKey]] <- data.frame(
+        PairKey = pairKey, 
+        StartCondition = pairResult$startConditionLabel, TargetCondition = pairResult$targetConditionLabel,
+        StartID = pairResult$startConditionId, TargetID = pairResult$targetConditionId, 
+        PValue = pValue,
+        NCases = pairResult$nCasesMatched, 
+        NControls = pairResult$nControlsMatched,
+        NCaseEvents = sum(pairResult$survivalData$is_case == 1 & pairResult$survivalData$event_status == 1),
+        NControlEvents = sum(pairResult$survivalData$is_case == 0 & pairResult$survivalData$event_status == 1),
+        stringsAsFactors = FALSE
+      )
+    }
+    finalSummaryDf <- if(length(summaryList) > 0) bind_rows(summaryList) else NULL
+    
+    # --- Combine and Save ---
+    # Extract only the plot objects for saving in the 'plots' component
+    finalPlotsData <- lapply(plotsAndPvalsData, function(item) item$plotObject)
+    
+    if (!is.null(finalSummaryDf) || length(finalPlotsData) > 0) { 
+      # Save the summary and the list of actual plot objects
+      resultsToSave <- list(summary = finalSummaryDf, plots = finalPlotsData) 
+      
+      tryCatch({
+        saveRDS(resultsToSave, file = savePath) 
+        
+        # Update reactive values for current session
+        loadedSummary(resultsToSave$summary) 
+        loadedPlots(resultsToSave$plots) # Store the list of plot objects    
+        currentLoadedFileName(basename(savePath)) 
+        
+        # Update file list dropdown
+        savedFiles <- listSavedFiles()
+        updateSelectInput(session, "selectLoadFile", choices = savedFiles, selected = tools::file_path_sans_ext(basename(savePath))) 
+        
+        numPairsSaved <- if(!is.null(resultsToSave$summary)) nrow(resultsToSave$summary) else 0
+        showNotification(paste("KM analysis complete. Results saved as", basename(savePath), "for", numPairsSaved, "pairs."), type = "message", duration=10)
+        
+      }, error = function(e) { showNotification(paste("Error saving results:", e$message), type = "error") })
+    } else {
+      showNotification("No valid summary or plot results generated to save.", type="warning")
+    }
+    
   })
   
-  # Render the KM plots in a grid layout
+  
+  #### LOADING KM ANALYSIS RESULTS FROM FILES
+  
+  # Define directory for storing computed KM results
+  resultsDir <- "km_results" 
+  dir.create(resultsDir, showWarnings = FALSE) # Create directory if it doesn't exist
+  
+  # --- Reactive Values to Store Loaded KM Results ---
+  # Stores the summary data frame (p-values, counts, etc.) from the currently loaded file
+  loadedSummary <- reactiveVal(NULL)
+  # Stores the list of ggsurvplot objects (plot + table) from the currently loaded file
+  loadedPlots <- reactiveVal(NULL) 
+  # Stores the name of the currently loaded result set
+  currentLoadedFileName <- reactiveVal(NULL)
+  
+  # --- Function to List Available Result Files ---
+  listSavedFiles <- function() {
+    files <- list.files(path = resultsDir, pattern = "\\.rds$", full.names = FALSE)
+    # Remove the .rds extension for display
+    tools::file_path_sans_ext(files) 
+  }
+  
+  # --- Update Load File Choices ---
+  # Use an observer to update the choices when the app starts and after saving
+  observe({
+    savedFiles <- listSavedFiles()
+    updateSelectInput(session, "selectLoadFile", choices = savedFiles)
+  })
+  
+  
+  # --- Output: Display Currently Loaded File Name ---
+  output$currentResultSet <- renderText({
+    fname <- currentLoadedFileName()
+    if (is.null(fname) || nchar(fname) == 0) { "No result set loaded." } 
+    else { paste("Currently loaded:", fname) }
+  })
+  
+  
+  # --- Load Selected Results File (Triggered by Button) ---
+  observeEvent(input$loadButton, {
+    selectedFileBaseName <- input$selectLoadFile 
+    req(selectedFileBaseName, cancelOutput = TRUE) 
+    loadPath <- file.path(resultsDir, paste0(selectedFileBaseName, ".rds"))
+    if (file.exists(loadPath)) {
+      tryCatch({
+        shiny::withProgress(message = 'Loading selected results...', value = 0.5, {
+          loadedData <- readRDS(loadPath)
+          loadedSummary(loadedData$summary)
+          loadedPlots(loadedData$plots) 
+          currentLoadedFileName(basename(loadPath)) 
+          selectedPlotsDataList(list()) # Clear selection when loading new file
+          incProgress(0.5) 
+        }) 
+        showNotification(paste("Loaded results from", basename(loadPath)), type="message")
+      }, error = function(e) { 
+        showNotification(paste("Error loading file:", e$message), type="error")
+        loadedSummary(NULL); loadedPlots(NULL); currentLoadedFileName(NULL); selectedPlotsDataList(list()) 
+      })
+    } else { 
+      showNotification(paste("Selected file not found:", basename(loadPath)), type="error")
+    }
+  })
+  
+  
+  # --- Output: KM Summary Table ---
+  output$kmSummaryTable <- DT::renderDataTable({
+    req(loadedSummary())
+    summaryDf <- loadedSummary() 
+    if("PValue" %in% names(summaryDf)) {
+      summaryDf$PValueFormatted <- scales::pvalue(summaryDf$PValue, accuracy = 0.001, add_p = TRUE) 
+    } else { summaryDf$PValueFormatted <- "N/A" }
+    datatable(
+      summaryDf %>% select(StartCondition, TargetCondition, PValueFormatted, NCases, NControls, NCaseEvents, NControlEvents, PairKey), 
+      colnames = c("Start Condition", "Outcome Condition", "P-Value", "N Cases", "N Controls", "N Case Events", "N Control Events", "PairKey"), 
+      rownames = FALSE, 
+      selection = 'multiple', # Allow multiple rows to be selected
+      options = list(pageLength = 10, columnDefs = list(list(visible=FALSE, targets=7)))
+    ) %>% DT::formatStyle(columns = "PValueFormatted", fontWeight = styleInterval(0.05, c('bold', 'normal'))) 
+  }) 
+  
+  
+  # --- Reactive Value for Selected Plot Data ---
+  selectedPlotsDataList <- reactiveVal(list()) # Initialize as an empty list
+  
+  
+  # --- Observer for Summary Table Row Selection ---
+  observeEvent(input$kmSummaryTable_rows_selected, {
+    # Ensure summary and plots are loaded before processing selection
+    req(loadedSummary()) 
+    selectedIndices <- input$kmSummaryTable_rows_selected
+    
+    # If rows are selected
+    if (!is.null(selectedIndices) && length(selectedIndices) > 0) {
+      summaryDf <- loadedSummary()
+      # Get the PairKeys for all selected rows
+      selectedPairKeys <- summaryDf$PairKey[selectedIndices]
+      
+      # Check if plots are loaded (load if necessary)
+      if (is.null(loadedPlots())) {
+        currentFileBaseName <- tools::file_path_sans_ext(currentLoadedFileName())
+        if (!is.null(currentFileBaseName) && nchar(currentFileBaseName) > 0) {
+          loadPath <- file.path(resultsDir, paste0(currentFileBaseName, ".rds"))
+          if(file.exists(loadPath)) { 
+            tryCatch({
+              loadedData <- readRDS(loadPath) 
+              if (!is.null(loadedData$plots)) { loadedPlots(loadedData$plots) } 
+              else { showNotification("Plots data not found within the current results file.", type="warning"); return() }
+            }, error = function(e) { showNotification(paste("Error loading results file for plots:", e$message), type = "error"); return() })
+          } else { showNotification("Current results file not found.", type="error"); return() }
+        } else { showNotification("No result set is currently loaded.", type="warning"); return() }
+      } 
+      
+      # Retrieve plot objects for selected keys
+      plotList <- loadedPlots() 
+      tempSelectedList <- list() # Temporary list to build the selection
+      
+      if (!is.null(plotList)) {
+        for (key in selectedPairKeys) {
+          if (key %in% names(plotList)) {
+            # Add the plot object to the temp list, using the key as the name
+            tempSelectedList[[key]] <- plotList[[key]] 
+          } else {
+            warning("Plot data for key ", key, " not found in the loaded set.")
+          }
+        }
+      }
+      # Update the reactive value with the list of selected plot objects
+      selectedPlotsDataList(tempSelectedList) 
+      
+    } else { 
+      # If no rows are selected, clear the list
+      selectedPlotsDataList(list()) 
+    }
+  }, ignoreNULL = FALSE) # ignoreNULL=FALSE ensures clearing works when selection becomes NULL
+  
+  
+  # --- Output: Dynamic UI for KM Plot Grid ---
   output$kmPlotsUI <- renderUI({
-    req(kmPlotsPairs())
-    plots <- kmPlotsPairs()
-    numPlots <- length(plots)
+    # Require the list of selected plots
+    selectedPlots <- selectedPlotsDataList()
+    req(length(selectedPlots) > 0) # Only render if plots are selected
+    
+    numPlots <- length(selectedPlots)
+    plotKeys <- names(selectedPlots) # Get the unique keys for selected plots
     
     colsPerRow <- 2
     numRows <- ceiling(numPlots / colsPerRow)
     plotTags <- list()
-    index <- 1
+    plotIndex <- 1
     
     for (r in 1:numRows) {
       rowContent <- list()
       for (c in 1:colsPerRow) {
-        if (index <= numPlots) {
-          # Use index to create unique output IDs for this pair
-          pairId <- paste0("kmPairOutput_", index)
+        if (plotIndex <= numPlots) {
+          # Use the unique pairKey for the output IDs
+          currentKey <- plotKeys[[plotIndex]]
           
           rowContent[[c]] <- column(width = 12 / colsPerRow,
                                     # Placeholder for the KM plot
-                                    plotOutput(outputId = paste0(pairId, "_plot")),
-                                    # Placeholder for the risk table (with adjusted height)
-                                    plotOutput(outputId = paste0(pairId, "_table"), height = "200px")
+                                    plotOutput(outputId = paste0("kmPlot_", currentKey)), 
+                                    # Placeholder for the risk table
+                                    plotOutput(outputId = paste0("kmTable_", currentKey), height = "200px") 
           )
-          index <- index + 1
+          plotIndex <- plotIndex + 1
         }
       }
       plotTags[[r]] <- fluidRow(rowContent)
     }
-    do.call(tagList, plotTags)
+    do.call(tagList, plotTags) # Combine all rows into a single UI output
   })
   
-  # Render each individual KM plot output.
+  # --- Observer for Rendering Plots into the Grid ---
   observe({
-    req(kmPlotsPairs())
-    plotsData <- kmPlotsPairs()
-    plotKeys <- names(plotsData)
-    numPlots <- length(plotKeys)
+    # React to changes in the list of selected plots
+    selectedPlots <- selectedPlotsDataList()
+    req(length(selectedPlots) > 0) # Only run if plots are selected
     
-    for (i in seq_len(numPlots)) {
+    plotKeys <- names(selectedPlots) # Get the keys of the selected plots
+    
+    # Loop through the selected plots and render them
+    for (key in plotKeys) {
+      # Use local() to ensure correct scoping of variables within the loop for renderPlot
       local({
-        ii <- i
-        currentKey <- plotKeys[[ii]]
-        ggsurvObj <- plotsData[[currentKey]] # Get the ggsurvplot list object
+        currentKey <- key # Capture key for this iteration
+        ggsurvObj <- selectedPlots[[currentKey]] # Get the ggsurvplot object
         
-        # Output ID for the main plot for this pair
-        plotOutputId <- paste0("kmPairOutput_", ii, "_plot")
-        # Output ID for the risk table for this pair
-        tableOutputId <- paste0("kmPairOutput_", ii, "_table")
+        # Define output IDs based on the key (must match renderUI)
+        plotOutputId <- paste0("kmPlot_", currentKey)
+        tableOutputId <- paste0("kmTable_", currentKey)
         
-        
-        # Render the main plot ($plot component)
+        # Render the KM plot
         output[[plotOutputId]] <- renderPlot({
           if (!is.null(ggsurvObj) && !is.null(ggsurvObj$plot)) {
-            print(ggsurvObj$plot) # Extract and print the plot part
+            print(ggsurvObj$plot) 
           } else {
-            plot.new(); title(main = "KM Plot Unavailable") # Fallback
+            plot.new(); title(main = "KM Plot Unavailable") 
           }
         })
         
-        # Render the risk table ($table component)
+        # Render the risk table
         output[[tableOutputId]] <- renderPlot({
           if (!is.null(ggsurvObj) && !is.null(ggsurvObj$table)) {
-            print(ggsurvObj$table) # Extract and print the table part
+            print(ggsurvObj$table) 
           } else {
-            plot.new(); title(main = "Risk Table Unavailable") # Fallback
+            plot.new(); title(main = "Risk Table Unavailable") 
           }
         })
       })
