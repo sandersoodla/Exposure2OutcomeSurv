@@ -695,11 +695,35 @@ server <- function(input, output, session) {
   generateKmPlotObjects <- function(matchedSurvivalData) {
     req(matchedSurvivalData)
     
+    numPairs <- length(matchedSurvivalData)
+    
+    # Show initial notification for plot generation
+    notificationId <- "km_plot_progress" # Unique ID for this notification
+    showNotification(
+      paste("Starting KM plot generation for", numPairs, "pairs..."), 
+      duration = NA, # Keep open until removed
+      id = notificationId, 
+      type = "message"
+    )
+    # Ensure notification is removed when function exits (even on error)
+    on.exit(removeNotification(id = notificationId), add = TRUE) 
+    
     # Create an empty list to store plots and tables. Use names that indicate the pair.
     plotsList <- list()
+    plotCounter <- 0
     
     # Loop through each start-target pair result stored in the input list
     for (pairKey in names(matchedSurvivalData)) {
+      plotCounter <- plotCounter + 1 # Increment counter
+      
+      # Update progress notification
+      showNotification(
+        paste0("Generating plot ", plotCounter, " of ", numPairs, ": ", pairKey), 
+        duration = NA, 
+        id = notificationId, # Use same ID to update
+        type = "message"
+      )
+      
       # Extract the result list for the current pair
       pairResult <- matchedSurvivalData[[pairKey]]
       # Extract the survival dataframe for this pair
