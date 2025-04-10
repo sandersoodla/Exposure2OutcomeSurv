@@ -751,7 +751,9 @@ server <- function(input, output, session) {
         legend.title = "Group",
         title = pairLabel,
         xlab = "Days from index date",
-        ylab = "Target-free probability"
+        ylab = "Target-free probability",
+        xlim = c(0, 1825), # Limit to 5 years
+        break.time.by = 400
       )
       
       # Store the entire ggsurvplot list object (plot + table)
