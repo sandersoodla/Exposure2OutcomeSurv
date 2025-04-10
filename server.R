@@ -985,7 +985,7 @@ server <- function(input, output, session) {
     numPlots <- length(selectedPlots)
     plotKeys <- names(selectedPlots) # Get the unique keys for selected plots
     
-    colsPerRow <- 2
+    colsPerRow <- 1
     numRows <- ceiling(numPlots / colsPerRow)
     plotTags <- list()
     plotIndex <- 1
