@@ -376,7 +376,7 @@ server <- function(input, output, session) {
     showNotification("Starting Incidence Density Matching for selected pairs...", duration = 10, type="message", id="proc_main")
     
     # --- Configuration ---
-    matchRatio <- 2 # Number of controls per case
+    matchRatio <- 5 # Number of controls per case
     
     # --- 2. Data Fetching ---
     # Fetch base demographic data for all potential persons
@@ -532,17 +532,12 @@ server <- function(input, output, session) {
         
         # Proceed only if there are potential controls in the risk set
         if (nrow(riskSet) > 0) {
-          # Calculate attained age for potential controls in the risk set at the case's index date
-          riskSetWithAge <- riskSet %>%
-            mutate(
-              attained_age_year = year(caseIndexDate) - year_of_birth
-            )
           
           # Perform Matching: Find controls matching the case (within the risk set)
-          # Example: Exact match on gender, nearest neighbor on attained age
-          matchedControlsDf <- riskSetWithAge %>%
+          # Example: Exact match on gender, nearest neighbor on year of birth (age)
+          matchedControlsDf <- riskSet %>%
             filter(gender_concept_id == caseGender) %>% # Match on gender
-            mutate(age_diff = abs(attained_age_year - caseAttainedAgeYear)) %>% # Calculate age difference
+            mutate(age_diff = abs(year_of_birth - caseBirthYear)) %>% # Calculate age difference
             arrange(age_diff) %>% # Find controls with the smallest age difference
             slice_head(n = matchRatio) # Select the desired number of controls
         }
