@@ -10,7 +10,7 @@ ui <- fluidPage(
   fluidRow(
     column(width = 11,
            # Application title
-           titlePanel("Start condition to outcome overview")
+           titlePanel("Exposure to outcome condition overview")
     ),
     column(width = 1,
            textOutput("dbName"),
@@ -21,11 +21,11 @@ ui <- fluidPage(
   
   sidebarLayout(
     sidebarPanel(
-      fileInput("startConditionFile", "Upload Start Conditions CSV", accept = ".csv"),
+      fileInput("exposureConditionFile", "Upload Exposure Conditions CSV", accept = ".csv"),
       
       selectizeInput(
-        "startConditionId",
-        "or select start condition concepts:",
+        "exposureConditionIds",
+        "or select exposure condition concepts:",
         choices = NULL,
         selected = character(0),
         multiple = TRUE,
@@ -35,10 +35,10 @@ ui <- fluidPage(
       ),
       hr(),
       
-      fileInput("targetConditionFile", "Upload Outcome Conditions CSV", accept = ".csv"),
+      fileInput("outcomeConditionFile", "Upload Outcome Conditions CSV", accept = ".csv"),
       
       selectizeInput(
-        "targetConditionId",
+        "outcomeConditionIds",
         "or select outcome condition concepts:",
         choices = NULL,
         selected = character(0),
@@ -57,7 +57,7 @@ ui <- fluidPage(
                 value = paste0("km_results_", Sys.Date())), 
       
       # Button to trigger the KM calculation and saving process
-      actionButton("getData", "Compute Results", icon = icon("calculator"), class = "btn-primary"),
+      actionButton("runAnalysis", "Run Analysis", icon = icon("calculator"), class = "btn-primary"),
       hr(),
       
       # --- Load Section ---
@@ -80,10 +80,8 @@ ui <- fluidPage(
     ),
     
     mainPanel(
-      uiOutput("percentageOutputs"),
-      
       tabsetPanel(
-        tabPanel("Start to Outcome KM",
+        tabPanel("Exposure to Outcome KM",
                  h4("KM Analysis Summary"),
                  p("Select one or more rows below to view plots."),
                  
