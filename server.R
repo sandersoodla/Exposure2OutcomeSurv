@@ -1,5 +1,5 @@
 source("scripts/getConditionInfo.R")
-source("scripts/conditionToCondition.R")
+source("scripts/conditions.R")
 source("scripts/demographicAnalysis.R")
 source("scripts/getMetadata.R")
 source("scripts/conceptRelations.R")
@@ -75,10 +75,10 @@ server <- function(input, output, session) {
   
   
   ## Initialize start condition choices
-  updateConditionChoices(session, "startConditionId")
+  updateConditionChoices(session, "exposureConditionIds")
   
   ## Initialize target condition choices
-  updateConditionChoices(session, "targetConditionId")
+  updateConditionChoices(session, "outcomeConditionIds")
   
   
   ### CONDITION INPUT FROM FILE
@@ -100,7 +100,8 @@ server <- function(input, output, session) {
     }
     
     if (length(colFound) > 0) {
-      return(df[[colFound[1]]])
+      idColumn <- df[[colFound[1]]]
+      return(unique(as.numeric(idColumn)))
     } else {
       showNotification("Uploaded file does not contain any valid column name for condition IDs.",
                        type = "error")
@@ -108,260 +109,190 @@ server <- function(input, output, session) {
     }
   }
   
+  
   # When a start condition file is uploaded, update the selected values:
-  observeEvent(input$startConditionFile, {
-    sourceIds <- extractConditionIds(input$startConditionFile)
-    if (!is.null(sourceIds)) {
-      # Map source concept ids to standard concept ids
-      mapping <- mapInputToStandardIds(cdm, sourceIds)
-      
-      # Identify unmapped source concept IDs
-      unmappedSourceIds <- setdiff(sourceIds, mapping$input_concept_id)
-      
-      # Check if there are any mappings
-      if (nrow(mapping) == 0) {
-        # If no mappings, then check which input IDs are already standard and exist in the dataset
-        occurredStandardIds <- sourceIds[sourceIds %in% allOccurredConditions$concept_id]
-      } else {
-        # Identify mapped standard IDs that occur in the dataset
-        occurredStandardIds <- mapping$standard_concept_id[mapping$standard_concept_id %in% allOccurredConditions$concept_id]
-      }
-      
-      # Create a detailed mapping table
-      mappingDetails <- mapping %>%
-        mutate(
-          status = as.character(ifelse(standard_concept_id %in% allOccurredConditions$concept_id,
-                                       "Mapped", "Mapped, no occurrences"))
+  observeEvent(input$exposureConditionFile, {
+    req(input$exposureConditionFile)
+    
+    # Extract condition concept IDs from file
+    sourceIds <- extractConditionIds(input$exposureConditionFile)
+    
+    if (is.null(sourceIds) || length(sourceIds) == 0) {
+      showNotification("No valid concept IDs found or could be extracted.", type = "warning")
+      return()
+    }
+
+    # Map source concept ids to standard concept ids
+    mapping <- mapInputToStandardIds(cdm, sourceIds)
+    
+    # Identify unmapped source concept IDs
+    unmappedSourceIds <- setdiff(sourceIds, mapping$input_concept_id)
+    
+    # Check if there are any mappings
+    if (nrow(mapping) == 0) {
+      # If no mappings, then check which input IDs are already standard and exist in the dataset
+      occurredStandardIds <- sourceIds[sourceIds %in% allOccurredConditions$concept_id]
+    } else {
+      # Identify mapped standard IDs that occur in the dataset
+      occurredStandardIds <- mapping$standard_concept_id[mapping$standard_concept_id %in% allOccurredConditions$concept_id]
+    }
+    
+    # Create a detailed mapping table
+    mappingDetails <- mapping %>%
+      mutate(status = as.character(
+        ifelse(
+          standard_concept_id %in% allOccurredConditions$concept_id,
+          "Mapped",
+          "Mapped, no occurrences"
         )
+      ))
+    
+    # If there are unmapped source IDs, add them as separate rows
+    if (length(unmappedSourceIds) > 0) {
+      unmappedDf <- data.frame(
+        input_concept_id = unmappedSourceIds,
+        standard_concept_id = NA,
+        status = "Not mapped",
+        stringsAsFactors = FALSE
+      )
       
-      # If there are unmapped source IDs, add them as separate rows
-      if (length(unmappedSourceIds) > 0) {
-        unmappedDf <- data.frame(
-          input_concept_id = unmappedSourceIds,
-          standard_concept_id = NA,
-          status = "Not mapped",
-          stringsAsFactors = FALSE
-        )
-        
-        # Update the status to "Standard" if the unmapped ID is in allOccurredConditions
-        unmappedDf$status[unmappedDf$input_concept_id %in% allOccurredConditions$concept_id] <- "Standard"
-        
-        mappingDetails <- dplyr::bind_rows(mappingDetails, unmappedDf)
-      }
+      # Update the status to "Standard" if the unmapped ID is in allOccurredConditions
+      unmappedDf$status[unmappedDf$input_concept_id %in% allOccurredConditions$concept_id] <- "Standard"
       
-      # Show a modal dialog with the mapping details
-      showModal(modalDialog(
+      mappingDetails <- dplyr::bind_rows(mappingDetails, unmappedDf)
+    }
+    
+    # Show a modal dialog with the mapping details
+    showModal(
+      modalDialog(
         title = "Input conditions mapped to standard concepts",
-        "Standard - input condition ID is already a standard concept ID; 
+        "Standard - input condition ID is already a standard concept ID;
         Not mapped - ID is non-standard and couldn't be mapped with concept_relationship;
         Mapped, no occurrences - ID mapped to standard, no occurrences in the dataset",
         DT::dataTableOutput("mappingTableDetails"),
         easyClose = TRUE,
         size = "l",
         footer = modalButton("Close")
-      ))
-      
-      # Render the mapping details table in the modal
-      output$mappingTableDetails <- DT::renderDataTable({
-        DT::datatable(mappingDetails, options = list(pageLength = 10))
-      })
-      
-      # Finally, update the selectizeInput with only occurring standard concept IDs
-      updateSelectizeInput(
-        session,
-        "startConditionId",
-        choices = setNames(allOccurredConditions$concept_id,
-                           allOccurredConditions$concept_name_id),
-        selected = occurredStandardIds,
-        server = TRUE
       )
-    }
+    )
+    
+    # Render the mapping details table in the modal
+    output$mappingTableDetails <- DT::renderDataTable({
+      DT::datatable(mappingDetails, options = list(pageLength = 10))
+    })
+    
+    # Finally, update the selectizeInput with only occurring standard concept IDs
+    updateSelectizeInput(
+      session,
+      "exposureConditionIds",
+      choices = setNames(
+        allOccurredConditions$concept_id,
+        allOccurredConditions$concept_name_id
+      ),
+      selected = occurredStandardIds,
+      server = TRUE
+    )
+    
   })
+  
   
   # When a target condition file is uploaded, update the selected values:
-  observeEvent(input$targetConditionFile, {
-    sourceIds <- extractConditionIds(input$targetConditionFile)
-    if (!is.null(sourceIds)) {
-      # Map source concept ids to standard concept ids
-      mapping <- mapInputToStandardIds(cdm, sourceIds)
-      
-      # Identify unmapped source concept IDs
-      unmappedSourceIds <- setdiff(sourceIds, mapping$input_concept_id)
-      
-      # Check if there are any mappings
-      if (nrow(mapping) == 0) {
-        # If no mappings, then check which input IDs are already standard and exist in the dataset
-        occurredStandardIds <- sourceIds[sourceIds %in% allOccurredConditions$concept_id]
-      } else {
-        # Identify mapped standard IDs that occur in the dataset
-        occurredStandardIds <- mapping$standard_concept_id[mapping$standard_concept_id %in% allOccurredConditions$concept_id]
-      }
-      
-      # Create a detailed mapping table
-      mappingDetails <- mapping %>%
-        mutate(
-          status = as.character(ifelse(standard_concept_id %in% allOccurredConditions$concept_id,
-                                       "Mapped", "Mapped, no occurrences"))
+  observeEvent(input$outcomeConditionFile, {
+    req(input$outcomeConditionFile)
+    
+    # Extract condition concept IDs from file
+    sourceIds <- extractConditionIds(input$outcomeConditionFile)
+    
+    if (is.null(sourceIds) || length(sourceIds) == 0) {
+      showNotification("No valid concept IDs found or could be extracted.", type = "warning")
+      return()
+    }
+    
+    # Map source concept ids to standard concept ids
+    mapping <- mapInputToStandardIds(cdm, sourceIds)
+    
+    # Identify unmapped source concept IDs
+    unmappedSourceIds <- setdiff(sourceIds, mapping$input_concept_id)
+    
+    # Check if there are any mappings
+    if (nrow(mapping) == 0) {
+      # If no mappings, then check which input IDs are already standard and exist in the dataset
+      occurredStandardIds <- sourceIds[sourceIds %in% allOccurredConditions$concept_id]
+    } else {
+      # Identify mapped standard IDs that occur in the dataset
+      occurredStandardIds <- mapping$standard_concept_id[mapping$standard_concept_id %in% allOccurredConditions$concept_id]
+    }
+    
+    # Create a detailed mapping table
+    mappingDetails <- mapping %>%
+      mutate(status = as.character(
+        ifelse(
+          standard_concept_id %in% allOccurredConditions$concept_id,
+          "Mapped",
+          "Mapped, no occurrences"
         )
+      ))
+    
+    # If there are unmapped source IDs, add them as separate rows
+    if (length(unmappedSourceIds) > 0) {
+      unmappedDf <- data.frame(
+        input_concept_id = unmappedSourceIds,
+        standard_concept_id = NA,
+        status = "Not mapped",
+        stringsAsFactors = FALSE
+      )
       
-      # If there are unmapped source IDs, add them as separate rows
-      if (length(unmappedSourceIds) > 0) {
-        unmappedDf <- data.frame(
-          input_concept_id = unmappedSourceIds,
-          standard_concept_id = NA,
-          status = "Not mapped",
-          stringsAsFactors = FALSE
-        )
-        
-        # Update the status to "Standard" if the unmapped ID is in allOccurredConditions
-        unmappedDf$status[unmappedDf$input_concept_id %in% allOccurredConditions$concept_id] <- "Standard"
-        
-        mappingDetails <- dplyr::bind_rows(mappingDetails, unmappedDf)
-      }
+      # Update the status to "Standard" if the unmapped ID is in allOccurredConditions
+      unmappedDf$status[unmappedDf$input_concept_id %in% allOccurredConditions$concept_id] <- "Standard"
       
-      # Show a modal dialog with the mapping details
-      showModal(modalDialog(
+      mappingDetails <- dplyr::bind_rows(mappingDetails, unmappedDf)
+    }
+    
+    # Show a modal dialog with the mapping details
+    showModal(
+      modalDialog(
         title = "Input conditions mapped to standard concepts",
-        "Standard - input condition ID is already a standard concept ID; 
+        "Standard - input condition ID is already a standard concept ID;
         Not mapped - ID is non-standard and couldn't be mapped with concept_relationship;
         Mapped, no occurrences - ID mapped to standard, no occurrences in the dataset",
         DT::dataTableOutput("mappingTableDetails"),
         easyClose = TRUE,
         size = "l",
         footer = modalButton("Close")
-      ))
-      
-      # Render the mapping details table in the modal
-      output$mappingTableDetails <- DT::renderDataTable({
-        DT::datatable(mappingDetails, options = list(pageLength = 10))
-      })
-      
-      # Finally, update the selectizeInput with only occurring standard concept IDs
-      updateSelectizeInput(
-        session,
-        "targetConditionId",
-        choices = setNames(allOccurredConditions$concept_id,
-                           allOccurredConditions$concept_name_id),
-        selected = occurredStandardIds,
-        server = TRUE
       )
-    }
-  })
+    )
+    
+    # Render the mapping details table in the modal
+    output$mappingTableDetails <- DT::renderDataTable({
+      DT::datatable(mappingDetails, options = list(pageLength = 10))
+    })
+    
+    # Finally, update the selectizeInput with only occurring standard concept IDs
+    updateSelectizeInput(
+      session,
+      "outcomeConditionIds",
+      choices = setNames(
+        allOccurredConditions$concept_id,
+        allOccurredConditions$concept_name_id
+      ),
+      selected = occurredStandardIds,
+      server = TRUE
+    )
   
+  })
   
   
   ############### TRAJECTORY DATA
   
   
   # Reactive expression to fetch data when the button is clicked
-  trajectoriesData <- eventReactive(input$getData, {
-    req(length(input$startConditionId) > 0)
-    req(length(input$targetConditionId) > 0)
+  trajectoriesData <- eventReactive(input$runAnalysis, {
+    req(length(input$exposureConditionIds) > 0)
+    req(length(input$outcomeConditionIds) > 0)
     
-    df <- getTrajectoriesForCondition(cdm, input$startConditionId)
+    df <- getTrajectoriesForCondition(cdm, input$exposureConditionIds)
     return(df)
   })
-  
-  timeframes = c("2 weeks" = 14,
-                 "1 month" = 30,
-                 "6 months" = 6 * 30,
-                 "1 year" = 365,
-                 "3 years" = 3 * 365,
-                 "5 years" = 5 * 365)
-  
-  startToTargetConditionDF <- eventReactive(trajectoriesData(), {
-    req(trajectoriesData())
-    
-    df <- createStartToTargetConditionDF(trajectoriesData(), input$startConditionId, input$targetConditionId, timeframes)
-    return(df)
-  })
-  
-  resultPercentages <- reactive({
-    calculateStartToTargetPercentages(startToTargetConditionDF())
-  })
-  
-  resultAbsolute <- reactive({
-    req(startToTargetConditionDF())
-    
-    df <- startToTargetConditionDF()
-    # Calculate the counts of TRUE values for each target_condition_in_* column
-    absoluteCounts <- sapply(df %>% select(starts_with("target_condition_in_")), function(x) sum(x))
-    # Calculate the total number of rows (start condition occurrences)
-    totalCounts <- sapply(df %>% select(starts_with("target_condition_in_")), function(x) length(x))
-    
-    #Combine the counts of TRUE and ALL
-    resultDf <- data.frame(
-      true_counts = absoluteCounts,
-      total = totalCounts
-    )
-    
-    return(resultDf)
-  })
-  
-  # Percentage data
-  output$percentageOutputs <- renderUI({
-    req(resultPercentages())
-    req(resultAbsolute())
-    
-    percentages <- resultPercentages()
-    absoluteCountsDf <- resultAbsolute()
-    
-    # Dynamically create UI elements for each percentage
-    percentageCols <- names(percentages)[grepl("^target_condition_in_", names(percentages))]
-    
-    # Generate labels based on column names
-    timeLabels <- sub("^target_condition_in_", "in ", percentageCols)
-    timeLabels <- paste0(timeLabels, ":")
-    
-    # Create output elements for each percentage and absolute count
-    outputElements <- lapply(seq_along(percentageCols), function(i) {
-      colName <- percentageCols[i]
-      trueCount <- absoluteCountsDf[colName, "true_counts"]
-      totalCount <- absoluteCountsDf[colName, "total"]
-      
-      column(width = 2,
-             h4(timeLabels[i]),
-             p(paste0(sprintf("%.1f", percentages[[colName]]), "% (", trueCount, "/", totalCount, ")"))
-      )
-    })
-    
-    
-    # Wrap in a fluidRow for horizontal layout
-    fluidRow(outputElements)
-  })
-  
-  
-  # Reactive value to store hidden conditions
-  hiddenConditionList <- reactiveVal(NULL)
-  
-  # Update the patient selector and hidden condition options when trajectories Data changes
-  observeEvent(trajectoriesData(), {
-    currentHidden <- hiddenConditionList()
-    availableConditions <- unique(trajectoriesData()$concept_name)
-    validHidden <- intersect(currentHidden, availableConditions) # Keep only valid hidden conditions
-    
-    updateSelectizeInput(
-      session,
-      "selectedPatient",
-      choices = unique(trajectoriesData()$person_id),
-      server = TRUE
-    )
-    updateSelectizeInput(
-      session,
-      "hiddenConditions",
-      choices = availableConditions,
-      selected = validHidden,
-      server = TRUE
-    )
-    # Update reactive value
-    hiddenConditionList(validHidden)
-  })
-  
-  
-  # Observer to update hiddenConditionList when input$hiddenConditions changes
-  observeEvent(input$hiddenConditions, {
-    hiddenConditionList(input$hiddenConditions)
-  }, ignoreNULL = FALSE)
   
   
   
@@ -369,16 +300,31 @@ server <- function(input, output, session) {
   
   
   # --- Function: Calculate Matched Survival Data using Incidence Density Matching ---
-  calculateMatchedSurvivalData <- function(selectedStartIds, selectedTargetIds, cdm) {
+  calculateMatchedSurvivalData <- function(selectedExposureIds,
+                                           selectedOutcomeIds,
+                                           cdm,
+                                           matchRatio = 4,
+                                           washoutYears = 2) {
+    
     # 1. Ensure required inputs and objects are available.
-    req(selectedStartIds, selectedTargetIds, cdm)
+    if (missing(selectedExposureIds) || missing(selectedOutcomeIds) || missing(cdm)) {
+      stop("Missing required arguments: selectedExposureIds, selectedOutcomeIds, cdm")
+    }
+    if (!is.numeric(selectedExposureIds) || !is.numeric(selectedOutcomeIds)) {
+      stop("selectedExposureIds and selectedOutcomeIds must be numeric vectors.")
+    }
+    if (!is.numeric(matchRatio) || matchRatio < 1) {
+      stop("matchRatio must be a positive integer.")
+    }
+    if (!is.numeric(washoutYears) || washoutYears < 0) {
+      stop("washoutYears must be a non-negative number.")
+    }
     
     showNotification("Starting Incidence Density Matching for selected pairs...", duration = 10, type="message", id="proc_main")
     
-    # --- Configuration ---
-    matchRatio <- 5 # Number of controls per case
     
     # --- 2. Data Fetching ---
+    
     # Fetch base demographic data for all potential persons
     demographicsBase <- tryCatch({
       getAllGendersAndBirthyears(cdm) %>%
@@ -392,6 +338,7 @@ server <- function(input, output, session) {
       removeNotification(id="proc_main")
       return(NULL)
     }
+    
     # Get the list of persons to use for subsequent queries
     basePersonIds <- demographicsBase$person_id
     
@@ -410,9 +357,10 @@ server <- function(input, output, session) {
       return(NULL)
     }
     
-    # Fetch ALL relevant condition dates (start & target) for the base cohort
-    allConceptIdsToFetch <- unique(c(selectedStartIds, selectedTargetIds))
-    allConditionDates <- tryCatch({
+    # Fetch ALL relevant condition dates (exposure & outcome) for the base cohort
+    allConceptIdsToFetch <- unique(c(selectedExposureIds, selectedOutcomeIds))
+    
+    allConditionFirstDates <- tryCatch({
       getFirstConditionDatesForPersons(cdm, personIds = basePersonIds, conceptIds = allConceptIdsToFetch) %>%
         # column names: person_id, concept_id, condition_start_date
         # Remove rows where min(NA) resulted in Inf (no date found)
@@ -424,20 +372,18 @@ server <- function(input, output, session) {
     })
     
     # Check if any condition dates were found
-    if (is.null(allConditionDates) || nrow(allConditionDates) == 0) {
+    if (is.null(allConditionFirstDates) || nrow(allConditionFirstDates) == 0) {
       showNotification("No condition dates found for the selected concepts.", type = "warning")
       removeNotification(id="proc_main")
       return(NULL)
     }
     
-    # --- 3. Prepare Base Cohort Data (Joining everything) ---
-    # Combine demographics, observation periods, and all fetched condition dates
+    
+    # --- 3. Prepare Base Cohort Data (Demographics + Obs periods) ---
+    
     cohortBase <- demographicsBase %>%
       inner_join(obsPeriods, by = "person_id") %>%
-      # Ensure observation period is valid
-      filter(obs_end_date > obs_start_date) %>%
-      # Join ALL condition dates (long format is useful for filtering later)
-      left_join(allConditionDates, by = "person_id")
+      filter(obs_end_date > obs_start_date) # Ensure observation period is valid
     
     # Check if the base cohort is valid after joins
     if (nrow(cohortBase) == 0) {
@@ -445,235 +391,231 @@ server <- function(input, output, session) {
       removeNotification(id="proc_main")
       return(NULL)
     }
-    # Note: cohortBase now potentially has multiple rows per person if they have dates for multiple concepts.
+    
     
     # --- 4. Initialize Results List ---
     # This list will store the final survival data for each valid start-target pair
     resultsList <- list()
     
-    # --- 5. Outer Loop: Iterate through each selected Start Condition ---
-    for (startId in selectedStartIds) {
-      # Use startId in notifications
-      startIdStr <- as.character(startId)
-      showNotification(paste("Processing Start ID:", startIdStr), duration = NA, id = paste0("proc_start_", startIdStr))
+    # --- 5. Outer Loop: Iterate through each selected Outcome condition ---
+    for (outcomeId in selectedOutcomeIds) {
       
-      # --- 5a. Identify Cases for the CURRENT startId ---
-      # Cases are persons with the start condition occurring within their observation period
-      cases <- cohortBase %>%
-        # Filter rows corresponding to the current start condition ID and ensure the date is valid
-        filter(concept_id == startId & !is.na(condition_start_date)) %>%
-        # Ensure the condition occurs within the person's observation period
-        filter(condition_start_date >= obs_start_date & condition_start_date <= obs_end_date) %>%
-        # Select relevant information for the case and define the index date
-        select(case_id = person_id,
-               index_date = condition_start_date, # The date the start condition occurred is the index date for matching
-               year_of_birth,
-               gender_concept_id) %>%
-        # Ensure unique case events (if a person could have multiple obs periods)
-        distinct(case_id, index_date, .keep_all = TRUE)
+      # Use id in notifications
+      outcomeIdStr <- as.character(outcomeId)
+      showNotification(paste("Preparing analysis for Outcome ID:", outcomeIdStr), duration = NA, id = paste0("prep_outcome_", outcomeIdStr))
       
-      # Check if any cases were found for this start condition
-      if (nrow(cases) == 0) {
-        showNotification(paste("No valid cases found for Start ID:", startIdStr, "within observation periods."), type = "warning", duration = 5)
-        removeNotification(id = paste0("proc_start_", startIdStr))
-        next # Skip to the next startId in the outer loop
+      
+      # --- 5a. Apply Washout to this Outcome ---
+      
+      # Get dates for the current outcome condition
+      outcomeDatesCurrentOutcome <- allConditionFirstDates %>%
+        filter(concept_id == outcomeId) %>%
+        select(person_id, outcome_date = condition_start_date)
+      
+      # Identify persons eligible for this outcome based on washout
+      eligiblePersonsForThisOutcome <- cohortBase %>%
+        select(person_id, obs_start_date) %>%
+        left_join(outcomeDatesCurrentOutcome, by = "person_id") %>%
+        filter(is.na(outcome_date) | outcome_date >= (obs_start_date %m+% years(washoutYears))) %>%
+        pull(person_id) %>%
+        unique()
+      
+      if (length(eligiblePersonsForThisOutcome) == 0) {
+        showNotification(paste("No persons eligible for Outcome ID:", outcomeIdStr, "after applying", washoutYears, "-year washout."), type = "warning", duration = 5)
+        removeNotification(id = paste0("prep_outcome_", outcomeIdStr))
+        next # Skip to the next outcomeId
       }
-      showNotification(paste("Identified", nrow(cases), "cases for Start ID:", startIdStr), type="message", duration = 5)
+      showNotification(paste("Eligible persons for Outcome ID", outcomeIdStr, "after washout:", length(eligiblePersonsForThisOutcome)), type="message", duration=3)
       
-      # --- 5b. Prepare Potential Controls Pool Data (for efficient lookup) ---
-      # This pool contains necessary info (demographics, obs period, date of CURRENT start condition if any)
-      # for everyone, needed to define the risk set quickly inside the case loop.
+      # Create the base cohort for this outcome analysis
+      cohortBaseForOutcome <- cohortBase %>%
+        filter(person_id %in% eligiblePersonsForThisOutcome)
       
-      # Get dates ONLY for the current start condition
-      startCondDatesPool <- allConditionDates %>%
-        filter(concept_id == startId) %>%
-        select(person_id, start_cond_date = condition_start_date)
       
-      # Create the pool by joining demographics, observation periods, and the specific start condition date
-      potentialControlsPool <- demographicsBase %>%
-        inner_join(obsPeriods, by="person_id") %>%
-        filter(obs_end_date > obs_start_date) %>%
+      # --- 5b. Prepare Potential Controls Pool for this Outcome ID ---
+      # Contains eligible persons + their date for this outcome (if any)
+      controlsPoolBaseOutcome <- cohortBaseForOutcome %>%
         select(person_id, year_of_birth, gender_concept_id, obs_start_date, obs_end_date) %>%
-        # Join the date of the current start condition (will be NA if person never had it)
-        left_join(startCondDatesPool, by="person_id")
+        left_join(outcomeDatesCurrentOutcome, by = "person_id") # Join the dates of the current outcome
+      
+      removeNotification(id = paste0("prep_outcome_", outcomeIdStr)) # Done preparing for this outcome
       
       
-      # --- 5c. Loop Through Cases and Match (Incidence Density Matching) ---
-      # This list will hold the matched sets (dataframes) for the current startId
-      matchedSetsList <- list()
-      nCasesProcessed <- 0 # Counter for cases looped through
-      nCasesMatched <- 0 # Counter for cases for whom controls were found
-      
-      totalCases <- nrow(cases)
-      # Iterate through each identified case for the current startId
-      for (i in 1:totalCases) {
-        # Get details for the current case
-        currentCase <- cases[i, ]
-        caseId <- currentCase$case_id
-        caseIndexDate <- currentCase$index_date
-        caseBirthYear <- currentCase$year_of_birth
-        caseGender <- currentCase$gender_concept_id
-        # Calculate the case's age in years at the index date for matching
-        caseAttainedAgeYear <- year(caseIndexDate) - caseBirthYear
-        nCasesProcessed <- nCasesProcessed + 1
+      # --- 6. Inner Loop: Iterate through each selected Exposure condition ---
+      for (exposureId in selectedExposureIds) {
         
-        # Define the Risk Set: Find potential controls eligible at the case's index date
-        riskSet <- potentialControlsPool %>%
-          filter(
-            person_id != caseId, # Exclude the case themselves
-            # Ensure potential controls are observed at the case's index date
-            obs_start_date <= caseIndexDate,
-            obs_end_date >= caseIndexDate,
-            # Crucial: Ensure controls do NOT have the start condition ON OR BEFORE the index date
-            is.na(start_cond_date) | start_cond_date > caseIndexDate
-          )
+        exposureIdStr <- as.character(exposureId)
+        uniquePairKey <- paste0("pair_", exposureIdStr, "_", outcomeIdStr)
+        showNotification(paste("Processing Exposure ID:", exposureIdStr, "for Outcome ID:", outcomeIdStr), duration = NA, id = paste0("proc_pair_", uniquePairKey))
         
-        matchedControlsDf <- NULL # Initialize dataframe for matched controls
         
-        # Proceed only if there are potential controls in the risk set
-        if (nrow(riskSet) > 0) {
+        # --- 6a. Identify Exposed Individuals for the current exposureId ---
+        
+        # Find first exposure date among persons eligible for this outcome
+        exposureDatesCurrentExposure <- allConditionFirstDates %>%
+          filter(person_id %in% eligiblePersonsForThisOutcome, concept_id == exposureId) %>%
+          select(person_id, exposure_date = condition_start_date)
+        
+        # Identify exposed individuals from the outcome-specific eligible cohort
+        exposedCohortDefinition <- cohortBaseForOutcome %>%
+          inner_join(exposureDatesCurrentExposure, by = "person_id") %>%
+          left_join(outcomeDatesCurrentOutcome, by = "person_id") %>%
+          filter(!is.na(exposure_date)) %>%
+          # Keep only the observation period where the exposure happened, if a person has multiple observation periods
+          filter(exposure_date >= obs_start_date & exposure_date <= obs_end_date) %>%
+          # Keep person only if outcome date is missing (no outcome) OR occurs strictly AFTER exposure date
+          filter(is.na(outcome_date) | outcome_date > exposure_date) %>%
+          # Select necessary info, define index date as exposure date
+          select(exposed_person_id = person_id,
+                 index_date = exposure_date,
+                 year_of_birth,
+                 gender_concept_id) %>%
+          distinct(exposed_person_id, index_date, .keep_all = TRUE) # Ensure unique exposure events per person
+        
+        if (nrow(exposedCohortDefinition) == 0) {
+          showNotification(paste("No valid exposed individuals found for Exposure ID:", exposureIdStr, "(eligible for Outcome", outcomeIdStr, "and outcome-free prior to exposure)"), type = "warning", duration = 3)
+          removeNotification(id = paste0("proc_pair_", uniquePairKey))
+          next # Skip to next exposureId
+        }
+        
+        
+        # --- 6b. Prepare Potential Controls Pool for this Exposure/Outcome pair ---
+        
+        # Add the exposure condition date info
+        potentialControlsPool <- controlsPoolBaseOutcome %>%
+          left_join(exposureDatesCurrentExposure, by="person_id")
+        
+        
+        # --- 6c. Loop Through EXPOSED Individuals and Match UNEXPOSED "controls" ---
+        matchedSetsList <- list()
+        nExposedProcessed <- 0
+        nExposedMatched <- 0
+        totalExposed <- nrow(exposedCohortDefinition)
+        
+        for (i in 1:totalExposed) {
+          currentExposed <- exposedCohortDefinition[i, ]
+          exposedPersonId <- currentExposed$exposed_person_id
+          exposureIndexDate <- currentExposed$index_date
+          exposedBirthYear <- currentExposed$year_of_birth
+          exposedGender <- currentExposed$gender_concept_id
+          nExposedProcessed <- nExposedProcessed + 1
           
-          # Perform Matching: Find controls matching the case (within the risk set)
-          # Example: Exact match on gender, nearest neighbor on year of birth (age)
-          matchedControlsDf <- riskSet %>%
-            filter(gender_concept_id == caseGender) %>% # Match on gender
-            mutate(age_diff = abs(year_of_birth - caseBirthYear)) %>% # Calculate age difference
-            arrange(age_diff) %>% # Find controls with the smallest age difference
-            slice_head(n = matchRatio) # Select the desired number of controls
+          # Define Risk Set for this Exposed Person and this Outcome
+          # Controls must be free of exposure AND outcome before index date
+          riskSet <- potentialControlsPool %>%
+            filter(
+              person_id != exposedPersonId,
+              obs_start_date <= exposureIndexDate,
+              obs_end_date >= exposureIndexDate,
+              is.na(exposure_date) | exposure_date > exposureIndexDate, # Free of exposure
+              is.na(outcome_date) | outcome_date > exposureIndexDate    # Free of outcome
+            )
+          
+          matchedControlsDf <- NULL
+          if (nrow(riskSet) > 0) {
+            # Perform matching (Nearest Neighbor on age, exact on gender)
+            matchedControlsDf <- riskSet %>%
+              filter(gender_concept_id == exposedGender) %>%
+              mutate(age_diff = abs(year_of_birth - exposedBirthYear)) %>%
+              arrange(age_diff) %>%
+              slice_head(n = matchRatio)
+          }
+          
+          # Store matched set if controls were found
+          if (!is.null(matchedControlsDf) && nrow(matchedControlsDf) > 0) {
+            nExposedMatched <- nExposedMatched + 1
+            setData <- tibble(
+              person_id = c(exposedPersonId, matchedControlsDf$person_id),
+              exposure_status = c(1, rep(0, nrow(matchedControlsDf))), # 1=Exposed, 0=Unexposed
+              index_date = exposureIndexDate,
+              set_id = i # Unique set identifier within this matching run
+            )
+            matchedSetsList[[i]] <- setData
+          } else {
+            matchedSetsList[[i]] <- NULL
+          }
+          
+          # Progress update
+          if (i %% 50 == 0 || i == totalExposed) {
+            currentProgress <- round((i / totalExposed) * 100)
+            showNotification(
+              paste0("Matching for Exp:", exposureIdStr, ", Out:", outcomeIdStr, " (", currentProgress,"%)"),
+              duration = NULL, id = paste0("match_prog_", uniquePairKey), type = "message"
+            )
+          }
+          
+        } # End exposed person matching loop
+        
+        # Clean up progress notification
+        removeNotification(id = paste0("match_prog_", uniquePairKey))
+        # Remove NULLs where no match was found
+        matchedSetsList <- matchedSetsList[!sapply(matchedSetsList, is.null)]
+        
+        # Check if any sets were actually created
+        if (length(matchedSetsList) == 0) {
+          showNotification(paste("No matched sets created for Exposure:", exposureIdStr, "Outcome:", outcomeIdStr), type = "warning", duration=5)
+          removeNotification(id = paste0("proc_pair_", uniquePairKey))
+          next # Skip survival calculation if no sets
         }
+        showNotification(paste("Matching complete for Exp:", exposureIdStr, "Out:", outcomeIdStr, "-", nExposedMatched, "sets."), type="message", duration = 3)
         
-        # Store the matched set (case + selected controls) if controls were successfully found
-        if (!is.null(matchedControlsDf) && nrow(matchedControlsDf) > 0) {
-          nCasesMatched <- nCasesMatched + 1
-          # Create a dataframe for this matched set
-          setData <- tibble(
-            person_id = c(caseId, matchedControlsDf$person_id),
-            is_case = c(1, rep(0, nrow(matchedControlsDf))), # 1 for case, 0 for controls
-            index_date = caseIndexDate, # Assign the case's index date to everyone in the set
-            set_id = i # Use the case loop index as a unique identifier for this set
-          )
-          # Store this set's dataframe in the list
-          matchedSetsList[[i]] <- setData
-        } else {
-          # Store NULL if no controls were found for this case
-          matchedSetsList[[i]] <- NULL
-        }
+        # Combine matched data for the current exposure-outcome pair
+        matchedDataFinal <- bind_rows(matchedSetsList)
         
-        # Update progress notification periodically
-        if (i %% 50 == 0 || i == totalCases) {
-          currentProgress <- round((i / totalCases) * 100)
-          showNotification(
-            paste0("Matching for Start ID: ", startIdStr, " (", currentProgress,"%) - Matched ", nCasesMatched, "/", i),
-            duration = NULL, # Keep showing until next update
-            id = paste0("match_prog_", startIdStr),
-            type = "message"
-          )
-        }
-      } # End loop iterating through cases for the current startId
-      
-      # Remove the progress notification for this startId
-      removeNotification(id = paste0("match_prog_", startIdStr))
-      
-      # Filter out the NULL entries where no match was found
-      matchedSetsList <- matchedSetsList[!sapply(matchedSetsList, is.null)]
-      
-      # Check if any matched sets were created for this startId
-      if (length(matchedSetsList) == 0) {
-        showNotification(paste("Matching complete, but no matched sets could be created for Start ID:", startIdStr), type = "warning", duration = 5)
-        removeNotification(id = paste0("proc_start_", startIdStr))
-        next # Skip to the next startId
-      }
-      showNotification(paste("Matching complete for Start ID:", startIdStr, ". Created sets for", nCasesMatched, "out of", nCasesProcessed, "cases."), type="message", duration = 5)
-      
-      # Consolidate all matched sets for the CURRENT startId into a single dataframe
-      matchedDataFinal <- bind_rows(matchedSetsList)
-      
-      # --- 6. Inner Loop: Calculate Survival for each Target Condition ---
-      # Prepare base data for survival calculation by joining matched data with observation periods
-      # This ensures we have the correct obs_start_date and obs_end_date for each person in the matched sets
-      survivalInputBase <- matchedDataFinal %>%
-        select(person_id, set_id, is_case, index_date) %>% # Keep matching info
-        # Join back to get observation periods for the matched individuals
-        inner_join(select(potentialControlsPool, person_id, obs_start_date, obs_end_date), by = "person_id") %>%
-        distinct() # Ensure unique person-set combinations
-      
-      
-      # Iterate through each selected target condition ID
-      for (targetId in selectedTargetIds) {
-        targetIdStr <- as.character(targetId)
-        # Show notification for survival calculation step
-        showNotification(paste("Calculating survival for Start:", startIdStr, "Target:", targetIdStr), duration = NA, id = paste0("proc_surv_", startIdStr, "_", targetIdStr))
         
-        # Get the dates for the CURRENT target condition from the pre-fetched data
-        targetDatesCurrent <- allConditionDates %>%
-          filter(concept_id == targetId) %>%
-          select(person_id, target_cond_date = condition_start_date)
+        # --- 6d. Calculate Survival for this Pair ---
         
-        # Join the target dates and calculate survival outcomes (time-to-event, status)
+        # Prepare base for survival calculation (matched individuals + obs periods)
+        survivalInputBase <- matchedDataFinal %>%
+          select(person_id, set_id, exposure_status, index_date) %>%
+          inner_join(select(cohortBaseForOutcome, person_id, obs_start_date, obs_end_date), by = "person_id") %>%
+          distinct()
+        
+        # Calculate time-to-outcome and status
         survivalDataCurrentPair <- survivalInputBase %>%
-          # Add the date of the target condition (if any) for each person
-          left_join(targetDatesCurrent, by = "person_id") %>%
+          left_join(outcomeDatesCurrentOutcome, by = "person_id") %>%
           mutate(
-            # Determine the date of the outcome event, must be AFTER index date and within observation
-            event_date = if_else(!is.na(target_cond_date) & target_cond_date > index_date & target_cond_date <= obs_end_date,
-                                 target_cond_date,
-                                 NA_Date_),
-            
-            # Determine the end of follow-up: observation end or event date, whichever is earlier
-            study_exit_date = pmin(obs_end_date, event_date, na.rm = TRUE),
-            
-            # Ensure follow-up does not end before it starts (handles edge cases)
-            study_exit_date = pmax(study_exit_date, index_date),
-            
-            # Determine event status: 1 if follow-up ended due to the target condition, 0 otherwise (censored)
-            event_status = if_else(!is.na(event_date) & event_date == study_exit_date, 1, 0),
-            
-            # Calculate follow-up time in days from index date to exit date
-            time_to_event = as.numeric(difftime(study_exit_date, index_date, units = "days"))
+            outcome_event_date = if_else(!is.na(outcome_date) & outcome_date > index_date & outcome_date <= obs_end_date,
+                                         outcome_date, NA_Date_),
+            study_exit_date = pmin(obs_end_date, outcome_event_date, na.rm = TRUE),
+            outcome_status = if_else(!is.na(outcome_event_date) & outcome_event_date == study_exit_date, 1, 0),
+            time_to_outcome = as.numeric(difftime(study_exit_date, index_date, units = "days"))
           ) %>%
-          # Filter out any rows with invalid follow-up time (should be >= 0)
-          filter(time_to_event >= 0) %>%
-          # Select the final columns needed for survival analysis functions
-          select(person_id, set_id, is_case, index_date, study_exit_date, time_to_event, event_status)
+          filter(time_to_outcome >= 0) %>%
+          select(person_id, set_id, exposure_status, index_date, study_exit_date, time_to_outcome, outcome_status)
         
-        # Check if any valid survival data was generated for this pair
+        # --- Store Results for this Pair ---
         if (nrow(survivalDataCurrentPair) > 0) {
-          # Store the results for this specific start-target pair in the main results list
-          uniquePairKey <- paste0("pair_", startIdStr, "_", targetIdStr)
-          # Get concept names for labels
-          startLabel <- allOccurredConditions$concept_name_id[allOccurredConditions$concept_id == startId]
-          targetLabel <- allOccurredConditions$concept_name_id[allOccurredConditions$concept_id == targetId]
+          exposureLabel <- allOccurredConditions$concept_name_id[allOccurredConditions$concept_id == exposureId]
+          outcomeLabel <- allOccurredConditions$concept_name_id[allOccurredConditions$concept_id == outcomeId]
           
-          # Store the data and metadata in the list
           resultsList[[uniquePairKey]] <- list(
             survivalData = survivalDataCurrentPair,
-            startConditionId = startId,
-            targetConditionId = targetId,
-            startConditionLabel = startLabel,
-            targetConditionLabel = targetLabel,
-            nCasesInMatching = nrow(cases), # Total cases identified for this startId
-            nCasesMatched = nCasesMatched, # Cases for whom at least one control was found
-            nControlsMatched = sum(survivalDataCurrentPair$is_case == 0), # Total controls in final analysis data for this pair
-            nTotalPersonsInAnalysis = nrow(survivalDataCurrentPair) # Total rows in analysis data for this pair
+            exposureId = exposureId, outcomeId = outcomeId,
+            exposureLabel = exposureLabel, outcomeLabel = outcomeLabel,
+            nExposedIdentifiedInitial = totalExposed, # Total exposed initially identified for matching
+            nExposedIncludedInMatching = nrow(exposedCohortDefinition), # Exposed after prior outcome check
+            nExposedMatched = nExposedMatched, # Exposed for whom controls were found
+            nUnexposedMatched = sum(survivalDataCurrentPair$exposure_status == 0), # Total matched controls
+            nTotalPersonsInAnalysis = nrow(survivalDataCurrentPair) # Total rows in final analysis dataset
           )
-          showNotification(paste("Survival calculated for Start:", startIdStr, "Target:", targetIdStr), duration = 3, type = "message")
+          showNotification(paste("Survival calculated for Exposure:", exposureIdStr, "Outcome:", outcomeIdStr), duration = 3, type = "message")
         } else {
-          # Notify if no valid survival data resulted for this pair
-          showNotification(paste("No valid survival data for Start:", startIdStr, "Target:", targetIdStr), type = "warning", duration = 5)
+          showNotification(paste("No valid survival data for Exposure:", exposureIdStr, "Outcome:", outcomeIdStr), type = "warning", duration = 5)
         }
-        # Remove the survival calculation notification for this pair
-        removeNotification(id = paste0("proc_surv_", startIdStr, "_", targetIdStr))
+        removeNotification(id = paste0("proc_pair_", uniquePairKey))
         
-      } # End inner loop iterating through targetIds
-      # Remove the notification for the current startId processing
-      removeNotification(id = paste0("proc_start_", startIdStr))
-      
-    } # End outer loop iterating through startIds
+      } # End inner loop iterating through exposures
+
+    } # End outer loop iterating through outcomes
+    
     
     # --- 7. Return Final Results List ---
+    
     # Clean up the main processing notification
     removeNotification(id="proc_main")
-    # Check if any results were generated at all
+    
+    # Check if any results were generated
     if (length(resultsList) == 0) {
       showNotification("Processing complete, but no results were generated for any pair.", type="error", duration = 10)
       return(NULL) # Return NULL if the list is empty
@@ -686,7 +628,7 @@ server <- function(input, output, session) {
   }
   
   
-  # Function: Generate KM plots, risk tables and p-value info for each start-target pair:
+  # Function: Generate KM plots, risk tables and p-value info for each exposure-outcome pair:
   generateKmPlotObjects <- function(matchedSurvivalData) {
     req(matchedSurvivalData)
     
@@ -707,7 +649,7 @@ server <- function(input, output, session) {
     plotsList <- list()
     plotCounter <- 0
     
-    # Loop through each start-target pair result stored in the input list
+    # Loop through each exposure-outcome pair result stored in the input list
     for (pairKey in names(matchedSurvivalData)) {
       plotCounter <- plotCounter + 1 # Increment counter
       
@@ -715,31 +657,32 @@ server <- function(input, output, session) {
       showNotification(
         paste0("Generating plot ", plotCounter, " of ", numPairs, ": ", pairKey), 
         duration = NA, 
-        id = notificationId, # Use same ID to update
+        id = notificationId,
         type = "message"
       )
       
       # Extract the result list for the current pair
       pairResult <- matchedSurvivalData[[pairKey]]
+      
       # Extract the survival dataframe for this pair
       survData <- pairResult$survivalData
       
-      # Create a factor for the grouping variable (Case vs Control)
+      # Create a factor for the grouping variable (Exposed vs Unexposed)
       # This provides clearer labels for the plot legend.
       survData <- survData %>%
-        mutate(group = factor(is_case,
+        mutate(group = factor(exposure_status,
                               levels = c(0, 1),
-                              labels = c("Control (Matched)", "Case (Start Cond.)")))
+                              labels = c("Unexposed (Matched)", "Exposed")))
       
-      # Fit a KM model using the group variable (With vs. Without start condition)
-      kmFit <- survfit(Surv(time_to_event, event_status) ~ group, data = survData)
+      # Fit a KM model using the group variable
+      kmFit <- survfit(Surv(time_to_outcome, outcome_status) ~ group, data = survData)
       
       # Calculate the p-value for storing it alongside the plots
       pValueInfo <- surv_pvalue(kmFit, data = survData)
       
       # Construct the plot title using labels from the results list
-      pairLabel <- paste0("Start: ", pairResult$startConditionLabel,
-                          " | Outcome: ", pairResult$targetConditionLabel)
+      pairPlotTitle <- paste0("Exposure: ", pairResult$exposureLabel,
+                          " | Outcome: ", pairResult$outcomeLabel)
       
       ggsurvObject <- ggsurvplot(
         kmFit,
@@ -748,10 +691,11 @@ server <- function(input, output, session) {
         pval = TRUE,
         risk.table = TRUE,
         risk.table.height = 0.25,
-        legend.title = "Group",
-        title = pairLabel,
+        legend.title = "Exposure",
+        legend.labs = c("Unexposed (Matched)", "Exposed"),
+        title = pairPlotTitle,
         xlab = "Days from index date",
-        ylab = "Target-free probability",
+        ylab = "Outcome-free probability",
         xlim = c(0, 1825), # Limit to 5 years
         break.time.by = 400
       )
@@ -771,48 +715,73 @@ server <- function(input, output, session) {
   
   
   # --- KM Computation, Plot Generation, and saving (Triggered by Button) ---
-  observeEvent(input$getData, {
-    req(input$startConditionId, input$targetConditionId, cdm) 
-    req(input$saveFileName, cancelOutput = TRUE) 
+  observeEvent(input$runAnalysis, {
+    req(input$exposureConditionIds, input$outcomeConditionIds, cdm) 
+    req(input$saveFileName, cancelOutput = TRUE)
+    
+    selectedExposureIds <- as.numeric(input$exposureConditionIds)
+    selectedOutcomeIds <- as.numeric(input$outcomeConditionIds)
+    
     
     # --- Filename Handling ---
     safeFileName <- gsub("[^a-zA-Z0-9_\\-]", "_", input$saveFileName) 
     safeFileName <- tools::file_path_sans_ext(safeFileName) 
-    if (nchar(safeFileName) == 0) { showNotification("Please enter a valid file name.", type="error"); return() }
+    if (nchar(safeFileName) == 0) {
+      showNotification("Please enter a valid file name.", type="error")
+      return()
+    }
     savePath <- file.path(resultsDir, paste0(safeFileName, ".rds"))
-    if (file.exists(savePath)) { showNotification(paste("File", basename(savePath), "already exists. Overwriting."), type="warning", duration = 5) }
+    if (file.exists(savePath)) {
+      showNotification(paste("File", basename(savePath), "already exists. Overwriting."), type="warning", duration = 5)
+    }
+    
     
     # --- Trigger Calculation ---
-    resultsData <- calculateMatchedSurvivalData(input$startConditionId, input$targetConditionId, cdm) 
-    if (is.null(resultsData)) { showNotification("KM analysis failed during data preparation. Nothing saved.", type="error"); return() }
+    matchedSurvivalData <- calculateMatchedSurvivalData(selectedExposureIds, selectedOutcomeIds, cdm) 
+    
+    if (is.null(matchedSurvivalData)) { showNotification("KM analysis failed during data preparation. Nothing saved.", type="error"); return() }
     
     # This returns a list containing plotObject and pvalue for each pair
-    plotsAndPvalsData <- generateKmPlotObjects(resultsData) 
+    plotsAndPvalsData <- generateKmPlotObjects(matchedSurvivalData) 
     if (is.null(plotsAndPvalsData)) { showNotification("KM analysis completed data preparation, but failed to generate plots. Nothing saved.", type="warning"); return() }
+    
     
     # --- Create Summary Data Frame ---
     summaryList <- list()
-    for(pairKey in names(resultsData)) {
-      pairResult <- resultsData[[pairKey]]
+    
+    for(pairKey in names(plotsAndPvalsData)) {
+      
+      pairResult <- matchedSurvivalData[[pairKey]]
+      pairPlotPval <- plotsAndPvalsData[[pairKey]]
 
       # Get the p-value
-      pValue <- plotsAndPvalsData[[pairKey]]$pValueInfo$pval
+      pValue <- pairPlotPval$pValueInfo$pval
+      pValueText <- pairPlotPval$pValueInfo$pval.txt # Formatted p-value text
+      
+      nExposedEvents <- sum(pairResult$survivalData$exposure_status == 1 & pairResult$survivalData$outcome_status == 1)
+      nUnexposedEvents <- sum(pairResult$survivalData$exposure_status == 0 & pairResult$survivalData$outcome_status == 1)
       
       summaryList[[pairKey]] <- data.frame(
-        PairKey = pairKey, 
-        StartCondition = pairResult$startConditionLabel, TargetCondition = pairResult$targetConditionLabel,
-        StartID = pairResult$startConditionId, TargetID = pairResult$targetConditionId, 
-        PValue = pValue,
-        NCases = pairResult$nCasesMatched, 
-        NControls = pairResult$nControlsMatched,
-        NCaseEvents = sum(pairResult$survivalData$is_case == 1 & pairResult$survivalData$event_status == 1),
-        NControlEvents = sum(pairResult$survivalData$is_case == 0 & pairResult$survivalData$event_status == 1),
+        pairKey = pairKey, 
+        exposureCondition = pairResult$exposureLabel, 
+        outcomeCondition = pairResult$outcomeLabel,
+        exposureID = pairResult$exposureId,
+        outcomeID = pairResult$outcomeId, 
+        pValue = pValue,
+        pValueText = pValueText,
+        nExposed = pairResult$nExposedMatched, 
+        nUnexposed = pairResult$nUnexposedMatched,
+        nExposedEvents = nExposedEvents,
+        nUnexposedEvents = nUnexposedEvents,
+        totalInAnalysis = pairResult$nTotalPersonsInAnalysis,
         stringsAsFactors = FALSE
       )
     }
     finalSummaryDf <- if(length(summaryList) > 0) bind_rows(summaryList) else NULL
     
+    
     # --- Combine and Save ---
+    
     # Extract only the plot objects for saving in the 'plots' component
     finalPlotsData <- lapply(plotsAndPvalsData, function(item) item$plotObject)
     
@@ -910,16 +879,13 @@ server <- function(input, output, session) {
   output$kmSummaryTable <- DT::renderDataTable({
     req(loadedSummary())
     summaryDf <- loadedSummary() 
-    if("PValue" %in% names(summaryDf)) {
-      summaryDf$PValueFormatted <- scales::pvalue(summaryDf$PValue, accuracy = 0.001, add_p = TRUE) 
-    } else { summaryDf$PValueFormatted <- "N/A" }
     datatable(
-      summaryDf %>% select(StartCondition, TargetCondition, PValueFormatted, NCases, NControls, NCaseEvents, NControlEvents, PairKey), 
-      colnames = c("Start Condition", "Outcome Condition", "P-Value", "N Cases", "N Controls", "N Case Events", "N Control Events", "PairKey"), 
+      summaryDf %>% select(exposureCondition, outcomeCondition, pValueText, nExposed, nUnexposed, nExposedEvents, nUnexposedEvents, pairKey), 
+      colnames = c("Exposure Condition", "Outcome Condition", "P-Value", "N Exposed", "N Unexposed", "N Outcomes for Exposed", "N Outcomes for Unexposed", "PairKey"), 
       rownames = FALSE, 
       selection = 'multiple', # Allow multiple rows to be selected
       options = list(pageLength = 10, columnDefs = list(list(visible=FALSE, targets=7)))
-    ) %>% DT::formatStyle(columns = "PValueFormatted", fontWeight = styleInterval(0.05, c('bold', 'normal'))) 
+    ) %>% DT::formatStyle(columns = "pValueText", fontWeight = styleInterval(0.05, c('bold', 'normal'))) 
   }) 
   
   
@@ -937,7 +903,7 @@ server <- function(input, output, session) {
     if (!is.null(selectedIndices) && length(selectedIndices) > 0) {
       summaryDf <- loadedSummary()
       # Get the PairKeys for all selected rows
-      selectedPairKeys <- summaryDf$PairKey[selectedIndices]
+      selectedPairKeys <- summaryDf$pairKey[selectedIndices]
       
       # Check if plots are loaded (load if necessary)
       if (is.null(loadedPlots())) {
@@ -1076,9 +1042,9 @@ server <- function(input, output, session) {
   
   # Dynamic UI for start condition pyramids
   output$startPyramidsUI <- renderUI({
-    req(input$startConditionId)
+    req(input$exposureConditionIds)
     tagList(
-      lapply(seq_along(input$startConditionId), function(i) {
+      lapply(seq_along(input$exposureConditionIds), function(i) {
         # Each pyramid gets its own module instance
         populationPyramidUI(paste0("startPyramid_", i))
       })
@@ -1087,9 +1053,9 @@ server <- function(input, output, session) {
   
   # Dynamic UI for target condition pyramids
   output$targetPyramidsUI <- renderUI({
-    req(input$targetConditionId)
+    req(input$outcomeConditionIds)
     tagList(
-      lapply(seq_along(input$targetConditionId), function(i) {
+      lapply(seq_along(input$outcomeConditionIds), function(i) {
         populationPyramidUI(paste0("targetPyramid_", i))
       })
     )
@@ -1097,12 +1063,12 @@ server <- function(input, output, session) {
   
   # Call the module for each start condition
   observe({
-    req(input$startConditionId)
-    for (i in seq_along(input$startConditionId)) {
+    req(input$exposureConditionIds)
+    for (i in seq_along(input$exposureConditionIds)) {
       local({
         idx <- i  # Capture the loop variable
         # Wrap the condition in a reactive expression
-        condition <- reactive({ input$startConditionId[idx] })
+        condition <- reactive({ input$exposureConditionIds[idx] })
         populationPyramidServer(paste0("startPyramid_", idx), condition)
       })
     }
@@ -1110,11 +1076,11 @@ server <- function(input, output, session) {
   
   # Call the module for each target condition
   observe({
-    req(input$targetConditionId)
-    for (i in seq_along(input$targetConditionId)) {
+    req(input$outcomeConditionIds)
+    for (i in seq_along(input$outcomeConditionIds)) {
       local({
         idx <- i
-        condition <- reactive({ input$targetConditionId[idx] })
+        condition <- reactive({ input$outcomeConditionIds[idx] })
         populationPyramidServer(paste0("targetPyramid_", idx), condition)
       })
     }
