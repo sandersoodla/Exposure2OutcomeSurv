@@ -719,20 +719,55 @@ server <- function(input, output, session) {
         ylab = "Outcome-free probability",
         xlim = c(0, maxPlotTime), # Limit x to max plot time
         ylim = dynamicYLim, # Use dynamic y-limit
-        break.time.by = 400
-      )
+        break.time.by = 400,
+        tables.y.text = FALSE
+      ) 
+      
+      ggsurvObject$plot <- ggsurvObject$plot + theme(legend.text = element_text(size = 14),
+                                                     legend.title = element_text(size = 14))
       
       # Store the entire ggsurvplot list object (plot + table)
       # and the p-value
       if (!is.null(ggsurvObject)) {
         plotsList[[pairKey]] <- list(
           plotObject = ggsurvObject,
-          pValueInfo = pValueInfo
+          kmPValueInfo = pValueInfo
         )
       }
     }
     plotsList
     
+  }
+  
+  
+  # --- Function: Calculate Cox Model Results ---
+  calculateCoxResults <- function(matchedSurvivalData) {
+    req(matchedSurvivalData)
+    
+    coxResultsList <- list()
+    
+    for (pairKey in names(matchedSurvivalData)) {
+      
+      pairData <- matchedSurvivalData[[pairKey]]
+      currentSurvData <- pairData$survivalData
+      
+      # Initialize results for this pair
+      coxRes <- list(hazardRatio = NA_real_, hrCiLower = NA_real_, hrCiUpper = NA_real_, hrPvalue = NA_real_, coxError = NA_character_)
+      
+      # Fit Cox model with clustering on sets
+      coxFit <- coxph(Surv(time_to_outcome, outcome_status) ~ exposure_status + cluster(set_id),
+                      data = currentSurvData, robust = TRUE)
+      
+      summaryCox <- summary(coxFit)
+      
+      coxRes$hazardRatio <- summaryCox$conf.int[,"exp(coef)"]
+      coxRes$hrCiLower <- summaryCox$conf.int[,"lower .95"]
+      coxRes$hrCiUpper <- summaryCox$conf.int[,"upper .95"]
+      coxRes$hrPvalue <- summaryCox$waldtest["pvalue"]
+      
+      coxResultsList[[pairKey]] <- coxRes
+    }
+    return(coxResultsList)
   }
   
   
@@ -758,45 +793,58 @@ server <- function(input, output, session) {
     }
     
     
-    # --- Trigger Survival Data Calculation ---
+    # --- Survival Data Preparation and Matching ---
     matchedSurvivalData <- calculateMatchedSurvivalData(selectedExposureIds, selectedOutcomeIds, cdm) 
     
-    if (is.null(matchedSurvivalData)) { showNotification("KM analysis failed during data preparation. Nothing saved.", type="error"); return() }
+    if (is.null(matchedSurvivalData)) { showNotification("Analysis failed during data preparation. Nothing saved.", type="error"); return() }
     
+    
+    # --- Generate KM plots and p-values ---
     maxPlotTime <- 1825 # End plot at 5 years
     
     # Get plotObject and pvalue for each pair
-    plotsAndPvalsData <- generateKmPlotObjects(matchedSurvivalData, maxPlotTime) 
+    kmResultsList <- generateKmPlotObjects(matchedSurvivalData, maxPlotTime) 
     
-    if (is.null(plotsAndPvalsData)) { showNotification("KM analysis completed data preparation, but failed to generate plots. Nothing saved.", type="warning"); return() }
+    if (is.null(kmResultsList)) { showNotification("Failed to generate KM plots.", type="error"); return() }
+    
+    
+    # --- Calculate Cox Model Results ---
+    coxResultsList <- calculateCoxResults(matchedSurvivalData)
+    
+    if (is.null(coxResultsList)) { showNotification("Failed to calculate Cox model results.", type="error"); return() }
     
     
     # --- Create Summary Data Frame ---
     summaryList <- list()
     
-    for(pairKey in names(plotsAndPvalsData)) {
+    for(pairKey in names(matchedSurvivalData)) {
       
-      pairResult <- matchedSurvivalData[[pairKey]]
-      pairPlotPval <- plotsAndPvalsData[[pairKey]]
+      pairData <- matchedSurvivalData[[pairKey]]
+      pairKM <- kmResultsList[[pairKey]]
+      pairCox <- coxResultsList[[pairKey]]
 
       # Get the p-value
-      pValue <- pairPlotPval$pValueInfo$pval
+      kmPvalue <- pairKM$kmPValueInfo$pval
       
-      nExposedEvents <- sum(pairResult$survivalData$exposure_status == 1 & pairResult$survivalData$outcome_status == 1)
-      nUnexposedEvents <- sum(pairResult$survivalData$exposure_status == 0 & pairResult$survivalData$outcome_status == 1)
+      nExposedEvents <- sum(pairData$survivalData$exposure_status == 1 & pairData$survivalData$outcome_status == 1)
+      nUnexposedEvents <- sum(pairData$survivalData$exposure_status == 0 & pairData$survivalData$outcome_status == 1)
       
       summaryList[[pairKey]] <- data.frame(
         pairKey = pairKey, 
-        exposureCondition = pairResult$exposureLabel, 
-        outcomeCondition = pairResult$outcomeLabel,
-        exposureID = pairResult$exposureId,
-        outcomeID = pairResult$outcomeId, 
-        pValue = pValue,
-        nExposed = pairResult$nExposedMatched, 
-        nUnexposed = pairResult$nUnexposedMatched,
+        exposureCondition = pairData$exposureLabel, 
+        outcomeCondition = pairData$outcomeLabel,
+        exposureID = pairData$exposureId,
+        outcomeID = pairData$outcomeId, 
+        kmPvalue = kmPvalue,
+        nExposed = pairData$nExposedMatched, 
+        nUnexposed = pairData$nUnexposedMatched,
         nExposedEvents = nExposedEvents,
         nUnexposedEvents = nUnexposedEvents,
-        totalInAnalysis = pairResult$nTotalPersonsInAnalysis,
+        totalInAnalysis = pairData$nTotalPersonsInAnalysis,
+        hazardRatio = pairCox$hazardRatio,
+        hrCiLower = pairCox$hrCiLower,     
+        hrCiUpper = pairCox$hrCiUpper,     
+        hrPvalue = pairCox$hrPvalue,
         stringsAsFactors = FALSE
       )
     }
@@ -806,21 +854,24 @@ server <- function(input, output, session) {
     # --- Adjust p-values ---
     
     if (!is.null(finalSummaryDf)) {
-      pValues <- finalSummaryDf$pValue
+      kmPvalues <- finalSummaryDf$kmPvalue
+      hrPvalues <- finalSummaryDf$hrPvalue
       
       # Number of p-values
       numTests <- nrow(finalSummaryDf)
       
-      # Adjust p-values with Bonferroni and Holm methods
-      finalSummaryDf$pAdjBon <- p.adjust(pValues, method = "bonferroni", n = numTests)
-      finalSummaryDf$pAdjHolm <- p.adjust(pValues, method = "holm", n = numTests)
+      #finalSummaryDf$pAdjBon <- p.adjust(pValues, method = "bonferroni", n = numTests)
+      
+      # Adjust p-values with the Holm method
+      finalSummaryDf$kmPvalueAdjHolm <- p.adjust(kmPvalues, method = "holm", n = numTests)
+      finalSummaryDf$hrPvalueAdjHolm <- p.adjust(hrPvalues, method = "holm", n = numTests)
     }
     
     
     # --- Combine and Save ---
     
     # Extract only the plot objects for saving in the 'plots' component
-    finalPlotsData <- lapply(plotsAndPvalsData, function(item) item$plotObject)
+    finalPlotsData <- lapply(kmResultsList, function(item) item$plotObject)
     
     if (!is.null(finalSummaryDf) || length(finalPlotsData) > 0) { 
       # Save the summary and the list of actual plot objects
@@ -917,24 +968,52 @@ server <- function(input, output, session) {
     req(loadedSummary())
     summaryDf <- loadedSummary() 
     
-    dt <- datatable(
-      summaryDf %>% select(exposureCondition, outcomeCondition,
-                           pValue, pAdjBon, pAdjHolm,
-                           nExposed, nUnexposed, nExposedEvents, nUnexposedEvents, pairKey), 
-      colnames = c("Exposure Condition", "Outcome Condition",
-                   "p-value (raw)", "p-value (Bonferroni)", "p-value (Holm)",
-                   "N Exposed", "N Unexposed", "N Outcomes for Exposed", "N Outcomes for Unexposed", "PairKey"), 
-      rownames = FALSE, 
-      selection = 'multiple', # Allow multiple rows to be selected
-      options = list(pageLength = 10, columnDefs = list(list(visible=FALSE, targets=9)))
+    colsToSelect <- c(
+      "exposureCondition", "outcomeCondition", 
+      "hazardRatio", "hrCiLower", "hrCiUpper", # HR and CI
+      "hrPvalueAdjHolm",                       # Adjusted HR P-value
+      "kmPvalueAdjHolm",                       # Adjusted KM P-value 
+      "nExposed", "nUnexposed", 
+      "nExposedEvents", "nUnexposedEvents",
+      "pairKey"                                # Hidden key for plot selection
     )
     
-    # Format p-value columns 
-    dt <- dt %>% DT::formatSignif(columns = c("pValue", "pAdjBon", "pAdjHolm"), digits = 3) 
+    colNamesDisplay <- c(
+      "Exposure", "Outcome", 
+      "HR", "HR CI Lower", "HR CI Upper", 
+      "HR P Adjusted (Holm)", 
+      "KM P Adjusted (Holm)", 
+      "N Exposed", "N Unexposed", 
+      "N Outcomes for Exposed", "N Outcomes for Unexposed",
+      "PairKey" 
+    )
+    
+    dt <- datatable(
+      summaryDf %>% select(all_of(colsToSelect)), 
+      colnames = colNamesDisplay, 
+      rownames = FALSE, 
+      selection = "multiple", # Allow multiple rows to be selected
+      extensions = "Buttons",
+      options = list(
+        pageLength = 10,
+        layout = list(
+          topStart = "buttons",
+          topEnd = "search",
+          bottomStart = "info",
+          bottomEnd = "paging"
+        ),
+        buttons = c("copy", "csv", "excel"),
+        columnDefs = list(
+          # Hide pairKey column
+          list(visible = FALSE, targets = length(colsToSelect) - 1)))
+    )
+    
+    # Format number columns 
+    dt <- dt %>% DT::formatSignif(columns = c("hazardRatio", "hrCiLower", "hrCiUpper", "hrPvalueAdjHolm", "kmPvalueAdjHolm"), digits = 3) 
     
     # Style based on significance
-    dt <- dt %>% DT::formatStyle(columns = "pAdjHolm", 
-                                 fontWeight = styleInterval(0.05, c('bold', 'normal')))
+    dt <- dt %>% DT::formatStyle(columns = c("hrPvalueAdjHolm", "kmPvalueAdjHolm"), 
+                                 fontWeight = styleInterval(0.05, c("bold", "normal")))
     
     dt
   }) 
@@ -1017,10 +1096,8 @@ server <- function(input, output, session) {
           currentKey <- plotKeys[[plotIndex]]
           
           rowContent[[c]] <- column(width = 12 / colsPerRow,
-                                    # Placeholder for the KM plot
-                                    plotOutput(outputId = paste0("kmPlot_", currentKey)), 
-                                    # Placeholder for the risk table
-                                    plotOutput(outputId = paste0("kmTable_", currentKey), height = "200px") 
+                                    # Placeholder for the KM plot (and risk table)
+                                    plotOutput(outputId = paste0("kmPlot_", currentKey), height = "600px"), 
           )
           plotIndex <- plotIndex + 1
         }
@@ -1045,25 +1122,15 @@ server <- function(input, output, session) {
         currentKey <- key # Capture key for this iteration
         ggsurvObj <- selectedPlots[[currentKey]] # Get the ggsurvplot object
         
-        # Define output IDs based on the key (must match renderUI)
+        # Define output ID based on the key
         plotOutputId <- paste0("kmPlot_", currentKey)
-        tableOutputId <- paste0("kmTable_", currentKey)
         
-        # Render the KM plot
+        # Render the KM plot and table
         output[[plotOutputId]] <- renderPlot({
-          if (!is.null(ggsurvObj) && !is.null(ggsurvObj$plot)) {
-            suppressWarnings(print(ggsurvObj$plot)) # Suppress warnings when x-axis values are outside the max plot time
+          if (!is.null(ggsurvObj)) {
+            suppressWarnings(print(ggsurvObj)) # Suppress warnings when x-axis values are outside the max plot time
           } else {
             plot.new(); title(main = "KM Plot Unavailable") 
-          }
-        })
-        
-        # Render the risk table
-        output[[tableOutputId]] <- renderPlot({
-          if (!is.null(ggsurvObj) && !is.null(ggsurvObj$table)) {
-            suppressWarnings(print(ggsurvObj$table))
-          } else {
-            plot.new(); title(main = "Risk Table Unavailable") 
           }
         })
       })
