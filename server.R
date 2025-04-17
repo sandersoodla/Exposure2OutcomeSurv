@@ -483,7 +483,7 @@ server <- function(input, output, session) {
           distinct(exposed_person_id, index_date, .keep_all = TRUE) # Ensure unique exposure events per person
         
         if (nrow(exposedCohortDefinition) == 0) {
-          showNotification(paste("No valid exposed individuals found for Exposure ID:", exposureIdStr, "(eligible for Outcome", outcomeIdStr, "and outcome-free prior to exposure)"), type = "warning", duration = 3)
+          showNotification(paste("No valid exposed individuals found for Exposure ID:", exposureIdStr, "(eligible for Outcome", outcomeIdStr, "and outcome-free prior to exposure)"), type = "warning", duration = 6)
           removeNotification(id = paste0("proc_pair_", uniquePairKey))
           next # Skip to next exposureId
         }
@@ -627,7 +627,7 @@ server <- function(input, output, session) {
     
     # Check if any results were generated
     if (length(resultsList) == 0) {
-      showNotification("Processing complete, but no results were generated for any pair.", type="error", duration = 10)
+      showNotification("Processing complete, but no valid results could be generated for any pair.", type="error", duration = 10)
       return(NULL) # Return NULL if the list is empty
     } else {
       showNotification("All processing complete.", type="message", duration = 5)
@@ -710,7 +710,6 @@ server <- function(input, output, session) {
         kmFit,
         data = survData,
         conf.int = TRUE,
-        pval = TRUE,
         risk.table = TRUE,
         risk.table.height = 0.25,
         legend.title = "Exposure",
@@ -782,7 +781,6 @@ server <- function(input, output, session) {
 
       # Get the p-value
       pValue <- pairPlotPval$pValueInfo$pval
-      pValueText <- pairPlotPval$pValueInfo$pval.txt # Formatted p-value text
       
       nExposedEvents <- sum(pairResult$survivalData$exposure_status == 1 & pairResult$survivalData$outcome_status == 1)
       nUnexposedEvents <- sum(pairResult$survivalData$exposure_status == 0 & pairResult$survivalData$outcome_status == 1)
@@ -794,7 +792,6 @@ server <- function(input, output, session) {
         exposureID = pairResult$exposureId,
         outcomeID = pairResult$outcomeId, 
         pValue = pValue,
-        pValueText = pValueText,
         nExposed = pairResult$nExposedMatched, 
         nUnexposed = pairResult$nUnexposedMatched,
         nExposedEvents = nExposedEvents,
@@ -804,6 +801,20 @@ server <- function(input, output, session) {
       )
     }
     finalSummaryDf <- if(length(summaryList) > 0) bind_rows(summaryList) else NULL
+    
+    
+    # --- Adjust p-values ---
+    
+    if (!is.null(finalSummaryDf)) {
+      pValues <- finalSummaryDf$pValue
+      
+      # Number of p-values
+      numTests <- nrow(finalSummaryDf)
+      
+      # Adjust p-values with Bonferroni and Holm methods
+      finalSummaryDf$pAdjBon <- p.adjust(pValues, method = "bonferroni", n = numTests)
+      finalSummaryDf$pAdjHolm <- p.adjust(pValues, method = "holm", n = numTests)
+    }
     
     
     # --- Combine and Save ---
@@ -905,13 +916,27 @@ server <- function(input, output, session) {
   output$kmSummaryTable <- DT::renderDataTable({
     req(loadedSummary())
     summaryDf <- loadedSummary() 
-    datatable(
-      summaryDf %>% select(exposureCondition, outcomeCondition, pValueText, nExposed, nUnexposed, nExposedEvents, nUnexposedEvents, pairKey), 
-      colnames = c("Exposure Condition", "Outcome Condition", "P-Value", "N Exposed", "N Unexposed", "N Outcomes for Exposed", "N Outcomes for Unexposed", "PairKey"), 
+    
+    dt <- datatable(
+      summaryDf %>% select(exposureCondition, outcomeCondition,
+                           pValue, pAdjBon, pAdjHolm,
+                           nExposed, nUnexposed, nExposedEvents, nUnexposedEvents, pairKey), 
+      colnames = c("Exposure Condition", "Outcome Condition",
+                   "p-value (raw)", "p-value (Bonferroni)", "p-value (Holm)",
+                   "N Exposed", "N Unexposed", "N Outcomes for Exposed", "N Outcomes for Unexposed", "PairKey"), 
       rownames = FALSE, 
       selection = 'multiple', # Allow multiple rows to be selected
-      options = list(pageLength = 10, columnDefs = list(list(visible=FALSE, targets=7)))
-    ) %>% DT::formatStyle(columns = "pValueText", fontWeight = styleInterval(0.05, c('bold', 'normal'))) 
+      options = list(pageLength = 10, columnDefs = list(list(visible=FALSE, targets=9)))
+    )
+    
+    # Format p-value columns 
+    dt <- dt %>% DT::formatSignif(columns = c("pValue", "pAdjBon", "pAdjHolm"), digits = 3) 
+    
+    # Style based on significance
+    dt <- dt %>% DT::formatStyle(columns = "pAdjHolm", 
+                                 fontWeight = styleInterval(0.05, c('bold', 'normal')))
+    
+    dt
   }) 
   
   
