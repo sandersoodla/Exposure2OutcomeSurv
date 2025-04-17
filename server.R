@@ -74,10 +74,10 @@ server <- function(input, output, session) {
   }
   
   
-  ## Initialize start condition choices
+  ## Initialize exposure condition choices
   updateConditionChoices(session, "exposureConditionIds")
   
-  ## Initialize target condition choices
+  ## Initialize outcome condition choices
   updateConditionChoices(session, "outcomeConditionIds")
   
   
@@ -110,7 +110,7 @@ server <- function(input, output, session) {
   }
   
   
-  # When a start condition file is uploaded, update the selected values:
+  # When an exposure condition file is uploaded, update the selected values:
   observeEvent(input$exposureConditionFile, {
     req(input$exposureConditionFile)
     
@@ -294,6 +294,16 @@ server <- function(input, output, session) {
     return(df)
   })
   
+  # Update the patient timeline selector options when trajectories Data changes
+  observeEvent(trajectoriesData(), {
+    updateSelectizeInput(
+      session,
+      "selectedPatient",
+      choices = unique(trajectoriesData()$person_id),
+      server = TRUE
+    )
+  })
+  
   
   
   #################### KM PLOTS FOR DEFINED TARGET OUTCOMES ####################
@@ -394,7 +404,7 @@ server <- function(input, output, session) {
     
     
     # --- 4. Initialize Results List ---
-    # This list will store the final survival data for each valid start-target pair
+    # This list will store the final survival data for each valid exposure-outcome pair
     resultsList <- list()
     
     # --- 5. Outer Loop: Iterate through each selected Outcome condition ---
@@ -629,7 +639,7 @@ server <- function(input, output, session) {
   
   
   # Function: Generate KM plots, risk tables and p-value info for each exposure-outcome pair:
-  generateKmPlotObjects <- function(matchedSurvivalData) {
+  generateKmPlotObjects <- function(matchedSurvivalData, maxPlotTime = 1825) {
     req(matchedSurvivalData)
     
     numPairs <- length(matchedSurvivalData)
@@ -677,7 +687,19 @@ server <- function(input, output, session) {
       # Fit a KM model using the group variable
       kmFit <- survfit(Surv(time_to_outcome, outcome_status) ~ group, data = survData)
       
-      # Calculate the p-value for storing it alongside the plots
+      # Find minimum survival for the graph y-axis limit
+      # Get summary at the max time
+      endSummary <- summary(kmFit, times = maxPlotTime)
+      
+      # Find smallest survival probability among groups at the end time
+      minEndProb <- min(endSummary$surv, na.rm = TRUE)
+      
+      # Set y-axis lower limit slightly below minimum
+      lowerYLim <- max(0, minEndProb - 0.02)
+      
+      dynamicYLim <- c(lowerYLim, 1.0)
+      
+      # Calculate the p-value for storing it in the summary table
       pValueInfo <- surv_pvalue(kmFit, data = survData)
       
       # Construct the plot title using labels from the results list
@@ -696,7 +718,8 @@ server <- function(input, output, session) {
         title = pairPlotTitle,
         xlab = "Days from index date",
         ylab = "Outcome-free probability",
-        xlim = c(0, 1825), # Limit to 5 years
+        xlim = c(0, maxPlotTime), # Limit x to max plot time
+        ylim = dynamicYLim, # Use dynamic y-limit
         break.time.by = 400
       )
       
@@ -736,13 +759,16 @@ server <- function(input, output, session) {
     }
     
     
-    # --- Trigger Calculation ---
+    # --- Trigger Survival Data Calculation ---
     matchedSurvivalData <- calculateMatchedSurvivalData(selectedExposureIds, selectedOutcomeIds, cdm) 
     
     if (is.null(matchedSurvivalData)) { showNotification("KM analysis failed during data preparation. Nothing saved.", type="error"); return() }
     
-    # This returns a list containing plotObject and pvalue for each pair
-    plotsAndPvalsData <- generateKmPlotObjects(matchedSurvivalData) 
+    maxPlotTime <- 1825 # End plot at 5 years
+    
+    # Get plotObject and pvalue for each pair
+    plotsAndPvalsData <- generateKmPlotObjects(matchedSurvivalData, maxPlotTime) 
+    
     if (is.null(plotsAndPvalsData)) { showNotification("KM analysis completed data preparation, but failed to generate plots. Nothing saved.", type="warning"); return() }
     
     
@@ -1001,7 +1027,7 @@ server <- function(input, output, session) {
         # Render the KM plot
         output[[plotOutputId]] <- renderPlot({
           if (!is.null(ggsurvObj) && !is.null(ggsurvObj$plot)) {
-            print(ggsurvObj$plot) 
+            suppressWarnings(print(ggsurvObj$plot)) # Suppress warnings when x-axis values are outside the max plot time
           } else {
             plot.new(); title(main = "KM Plot Unavailable") 
           }
@@ -1010,7 +1036,7 @@ server <- function(input, output, session) {
         # Render the risk table
         output[[tableOutputId]] <- renderPlot({
           if (!is.null(ggsurvObj) && !is.null(ggsurvObj$table)) {
-            print(ggsurvObj$table) 
+            suppressWarnings(print(ggsurvObj$table))
           } else {
             plot.new(); title(main = "Risk Table Unavailable") 
           }
@@ -1040,7 +1066,7 @@ server <- function(input, output, session) {
   }
   
   
-  # Dynamic UI for start condition pyramids
+  # Dynamic UI for exposure condition pyramids
   output$startPyramidsUI <- renderUI({
     req(input$exposureConditionIds)
     tagList(
@@ -1051,7 +1077,7 @@ server <- function(input, output, session) {
     )
   })
   
-  # Dynamic UI for target condition pyramids
+  # Dynamic UI for outcome condition pyramids
   output$targetPyramidsUI <- renderUI({
     req(input$outcomeConditionIds)
     tagList(
@@ -1061,7 +1087,7 @@ server <- function(input, output, session) {
     )
   })
   
-  # Call the module for each start condition
+  # Call the module for each exposure condition
   observe({
     req(input$exposureConditionIds)
     for (i in seq_along(input$exposureConditionIds)) {
@@ -1074,7 +1100,7 @@ server <- function(input, output, session) {
     }
   })
   
-  # Call the module for each target condition
+  # Call the module for each outcome condition
   observe({
     req(input$outcomeConditionIds)
     for (i in seq_along(input$outcomeConditionIds)) {
