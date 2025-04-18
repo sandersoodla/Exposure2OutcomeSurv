@@ -10,7 +10,7 @@ ui <- fluidPage(
   fluidRow(
     column(width = 11,
            # Application title
-           titlePanel("Exposure to outcome condition overview")
+           titlePanel("Exposure to outcome condition survival analysis")
     ),
     column(width = 1,
            textOutput("dbName"),
