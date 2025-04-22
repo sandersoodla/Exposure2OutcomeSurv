@@ -26,4 +26,6 @@ Suggests:
     devtools,
     roxygen2,
     testthat,
-    usethis
+    usethis,
+    pkgdown
+URL: https://sandersoodla.github.io/Exposure2OutcomeSurv/

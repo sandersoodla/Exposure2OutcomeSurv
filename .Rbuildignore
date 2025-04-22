@@ -6,3 +6,7 @@
 ^\.Rhistory$
 ^\.Renviron$
 ^README\.md$
+^_pkgdown\.yml$
+^docs$
+^pkgdown$
+^\.github$

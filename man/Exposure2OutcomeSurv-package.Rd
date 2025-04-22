@@ -8,6 +8,13 @@
 \description{
 Shiny application for exploring exposure-outcome survival relationships using matched cohort data from an OMOP CDM. Uses Kaplan-Meier plots for visualisation and the Cox model to calculate Hazard Ratios.
 }
+\seealso{
+Useful links:
+\itemize{
+  \item \url{https://sandersoodla.github.io/Exposure2OutcomeSurv/}
+}
+
+}
 \author{
 \strong{Maintainer}: Sander Soodla \email{sandersoodla@gmail.com}
 

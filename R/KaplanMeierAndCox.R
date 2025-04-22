@@ -1,18 +1,47 @@
-generateKmPlotObjects <- function(matchedSurvivalData, maxPlotTime = 1825) {
-  req(matchedSurvivalData)
+#' Generate Kaplan-Meier Plot Objects for Matched Pairs
+#'
+#' Creates Kaplan-Meier plots (with risk tables) using `survminer` and calculates
+#' log-rank p-values for each exposure-outcome pair present in the matched
+#' survival data. Adjusts plot limits dynamically.
+#'
+#' @param matchedSurvivalData A list structured generally like the output of
+#'   `calculateMatchedSurvivalData`. Each named element corresponds to an
+#'   exposure-outcome pair and is itself a list that must contain at least:
+#'   `$survivalData` (a tibble/data frame with columns `time_to_outcome`,
+#'   `outcome_status`, `exposure_status`) and descriptive character labels
+#'   `$exposureLabel`, `$outcomeLabel`.
+#' @param maxPlotTime Numeric. The maximum time (in days, starting from index date)
+#'   to display on the x-axis of the Kaplan-Meier plots. Defaults to 1825 (~5 years).
+#' @param session The Shiny session object, used for displaying progress
+#'   notifications. Defaults to `shiny::getDefaultReactiveDomain()` which works
+#'   when called within a reactive context.
+#'
+#' @return A list named by the unique exposure-outcome pair keys present in
+#'   `matchedSurvivalData`. Each element is a list containing:
+#'   \describe{
+#'     \item{`plotObject`}{The list object returned by `survminer::ggsurvplot`. This itself contains elements like `$plot` (the ggplot KM curve) and `$table` (the risk table plot).}
+#'     \item{`kmPValueInfo`}{The object returned by `survminer::surv_pvalue`, containing details about the log-rank test p-value.}
+#'   }
+#'   Returns an empty list if `matchedSurvivalData` is NULL or empty.
+#'
+generateKmPlotObjects <- function(matchedSurvivalData, maxPlotTime = 1825, session = shiny::getDefaultReactiveDomain()) {
+  shiny::req(matchedSurvivalData)
   
   numPairs <- length(matchedSurvivalData)
   
   # Show initial notification for plot generation
   notificationId <- "km_plot_progress" # Unique ID for this notification
-  showNotification(
-    paste("Starting KM plot generation for", numPairs, "pairs..."), 
-    duration = NA, # Keep open until removed
-    id = notificationId, 
-    type = "message"
-  )
-  # Ensure notification is removed when function exits (even on error)
-  on.exit(removeNotification(id = notificationId), add = TRUE) 
+  if (!is.null(session)) {
+    shiny::showNotification(
+      paste("Starting KM plot generation for", numPairs, "pairs..."), 
+      duration = NA, # Keep open until removed
+      id = notificationId, 
+      type = "message",
+      session = session
+    )
+    # Ensure notification is removed when function exits (even on error)
+    on.exit(shiny::removeNotification(id = notificationId), add = TRUE) 
+  }
   
   # Create an empty list to store plots and tables. Use names that indicate the pair.
   plotsList <- list()
@@ -23,12 +52,15 @@ generateKmPlotObjects <- function(matchedSurvivalData, maxPlotTime = 1825) {
     plotCounter <- plotCounter + 1 # Increment counter
     
     # Update progress notification
-    showNotification(
-      paste0("Generating plot ", plotCounter, " of ", numPairs, ": ", pairKey), 
-      duration = NA, 
-      id = notificationId,
-      type = "message"
-    )
+    if (!is.null(session)) {
+      shiny::showNotification(
+        paste0("Generating plot ", plotCounter, " of ", numPairs, ": ", pairKey), 
+        duration = NA, 
+        id = notificationId,
+        type = "message",
+        session = session
+      )
+    }
     
     # Extract the result list for the current pair
     pairResult <- matchedSurvivalData[[pairKey]]
@@ -99,9 +131,30 @@ generateKmPlotObjects <- function(matchedSurvivalData, maxPlotTime = 1825) {
 }
 
 
-
+#' Calculate Cox Model Results for Matched Pairs
+#'
+#' Fits a Cox Proportional Hazards model for each exposure-outcome pair,
+#' comparing exposed (status=1) vs. unexposed (status=0) groups. Accounts for the
+#' matched set structure using `cluster(set_id)` to compute robust variance
+#' estimates for the hazard ratio.
+#'
+#' @param matchedSurvivalData A list structured generally like the output of
+#'   `calculateMatchedSurvivalData`. Each named element corresponds to an
+#'   exposure-outcome pair and must contain `$survivalData` (a tibble/data frame
+#'   with columns `time_to_outcome`, `outcome_status`, `exposure_status`, `set_id`).
+#'
+#' @return A list named by the unique exposure-outcome pair keys present in
+#'   `matchedSurvivalData`. Each element is a list containing the Cox model results:
+#'   \describe{
+#'     \item{`hazardRatio`}{Numeric estimate of the Hazard Ratio (Exposed vs. Unexposed).}
+#'     \item{`hrCiLower`}{Numeric lower bound of the 95% Confidence Interval for the HR.}
+#'     \item{`hrCiUpper`}{Numeric upper bound of the 95% Confidence Interval for the HR.}
+#'     \item{`hrPvalue`}{Numeric p-value associated with the Hazard Ratio (from Wald test).}
+#'   }
+#'   Results will be `NA` if the model fails to converge or data is insufficient.
+#'
 calculateCoxResults <- function(matchedSurvivalData) {
-  req(matchedSurvivalData)
+  shiny::req(matchedSurvivalData)
   
   coxResultsList <- list()
   
