@@ -6,8 +6,8 @@ Authors@R:
     person("Sander", "Soodla", , "sandersoodla@gmail.com", role = c("aut", "cre"))
 Description: Shiny application for exploring exposure-outcome survival relationships using matched cohort data from an OMOP CDM. Uses Kaplan-Meier plots for visualisation and the Cox model to calculate Hazard Ratios.
 License: Apache License (>= 2)
-URL: https://github.com/sandersoodla/Exposure2OutcomeSurv,
-    https://sandersoodla.github.io/Exposure2OutcomeSurv/
+URL: https://sandersoodla.github.io/Exposure2OutcomeSurv/, 
+    https://github.com/sandersoodla/Exposure2OutcomeSurv
 BugReports: https://github.com/sandersoodla/Exposure2OutcomeSurv/issues
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)

@@ -11,8 +11,8 @@ Shiny application for exploring exposure-outcome survival relationships using ma
 \seealso{
 Useful links:
 \itemize{
-  \item \url{https://github.com/sandersoodla/Exposure2OutcomeSurv}
   \item \url{https://sandersoodla.github.io/Exposure2OutcomeSurv/}
+  \item \url{https://github.com/sandersoodla/Exposure2OutcomeSurv}
   \item Report bugs at \url{https://github.com/sandersoodla/Exposure2OutcomeSurv/issues}
 }
 
