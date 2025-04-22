@@ -1,4 +1,14 @@
 url: https://sandersoodla.github.io/Exposure2OutcomeSurv/
+
 template:
   bootstrap: 5
 
+reference:
+  - title: "Main Application Function"
+    contents:
+      - launchApp
+      
+  - title: "Internal Functions"
+    description: "These functions are for internal use by the package."
+    contents:
+      - has_keyword("internal")

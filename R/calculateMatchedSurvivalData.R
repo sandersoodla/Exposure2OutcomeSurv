@@ -34,6 +34,7 @@
 #' Returns `NULL` if a major initial error occurs (e.g., fetching data fails,
 #' initial cohort is empty) or if no exposure-outcome pairs yield valid results.
 #'
+#' @keywords internal
 calculateMatchedSurvivalData <- function(selectedExposureIds,
                                          selectedOutcomeIds,
                                          cdm,

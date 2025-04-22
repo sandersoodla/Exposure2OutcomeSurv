@@ -57,3 +57,4 @@ applying washout, defining cohorts, performing matching, calculating survival,
 and returning results for multiple exposure-outcome pairs using Incidence
 Density Matching principles. It calls specific helper functions for each step.
 }
+\keyword{internal}
