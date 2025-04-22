@@ -6,6 +6,7 @@
 <url><loc>https://sandersoodla.github.io/Exposure2OutcomeSurv/reference/Exposure2OutcomeSurv-package.html</loc></url>
 <url><loc>https://sandersoodla.github.io/Exposure2OutcomeSurv/reference/calculateCoxResults.html</loc></url>
 <url><loc>https://sandersoodla.github.io/Exposure2OutcomeSurv/reference/calculateMatchedSurvivalData.html</loc></url>
+<url><loc>https://sandersoodla.github.io/Exposure2OutcomeSurv/reference/calculatePairSurvival.html</loc></url>
 <url><loc>https://sandersoodla.github.io/Exposure2OutcomeSurv/reference/defineExposedCohortForPair.html</loc></url>
 <url><loc>https://sandersoodla.github.io/Exposure2OutcomeSurv/reference/fetchDataForSurvAnalysis.html</loc></url>
 <url><loc>https://sandersoodla.github.io/Exposure2OutcomeSurv/reference/filterByWashoutAndGetOutcomeDates.html</loc></url>
