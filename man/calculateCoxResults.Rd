@@ -29,3 +29,4 @@ comparing exposed (status=1) vs. unexposed (status=0) groups. Accounts for the
 matched set structure using \code{cluster(set_id)} to compute robust variance
 estimates for the hazard ratio.
 }
+\keyword{internal}

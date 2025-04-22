@@ -39,3 +39,4 @@ Creates Kaplan-Meier plots (with risk tables) using \code{survminer} and calcula
 log-rank p-values for each exposure-outcome pair present in the matched
 survival data. Adjusts plot limits dynamically.
 }
+\keyword{internal}

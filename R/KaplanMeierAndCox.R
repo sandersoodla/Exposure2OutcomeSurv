@@ -23,7 +23,8 @@
 #'     \item{`kmPValueInfo`}{The object returned by `survminer::surv_pvalue`, containing details about the log-rank test p-value.}
 #'   }
 #'   Returns an empty list if `matchedSurvivalData` is NULL or empty.
-#'
+#' 
+#' @keywords internal
 generateKmPlotObjects <- function(matchedSurvivalData, maxPlotTime = 1825, session = shiny::getDefaultReactiveDomain()) {
   shiny::req(matchedSurvivalData)
   
@@ -153,6 +154,7 @@ generateKmPlotObjects <- function(matchedSurvivalData, maxPlotTime = 1825, sessi
 #'   }
 #'   Results will be `NA` if the model fails to converge or data is insufficient.
 #'
+#' @keywords internal
 calculateCoxResults <- function(matchedSurvivalData) {
   shiny::req(matchedSurvivalData)
   

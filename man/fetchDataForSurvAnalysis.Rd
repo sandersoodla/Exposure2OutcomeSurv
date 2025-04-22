@@ -27,3 +27,4 @@ Returns \code{NULL} for list elements if data fetching fails.
 Fetches initial demographic, observation period, and condition occurrence data
 required for the survival analysis workflow.
 }
+\keyword{internal}

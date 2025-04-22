@@ -17,6 +17,8 @@
 #' Returns `NULL` for list elements if data fetching fails.
 #'
 #' @importFrom shiny showNotification removeNotification
+#' 
+#' @keywords internal
 fetchDataForSurvAnalysis <- function(cdm, allConceptIdsToFetch, session) {
   
   showNotification("Fetching base data (demographics, observation periods, conditions)...", duration = 5, type = "message", id = "fetch_base", session = session)
@@ -107,6 +109,7 @@ fetchDataForSurvAnalysis <- function(cdm, allConceptIdsToFetch, session) {
 #'   }
 #' Returns an empty tibble for `cohortEligible` if no persons remain after washout.
 #'
+#' @keywords internal
 filterByWashoutAndGetOutcomeDates <- function(cohortBase, allConditionDates, outcomeId, washoutYears, session) {
   
   if (is.null(cohortBase) || nrow(cohortBase) == 0) {
@@ -175,6 +178,7 @@ filterByWashoutAndGetOutcomeDates <- function(cohortBase, allConditionDates, out
 #'   }
 #' Returns `NULL` for `exposed` if no valid exposed individuals are found.
 #'
+#' @keywords internal
 defineExposedCohortForPair <- function(cohortBaseForOutcome,
                                        allConditionFirstDates,
                                        outcomeDatesCurrentOutcome,
@@ -245,6 +249,7 @@ defineExposedCohortForPair <- function(cohortBaseForOutcome,
 #'   }
 #' Returns `NULL` for `matchedData` if no matched sets could be created.
 #'
+#' @keywords internal
 performPairMatching <- function(exposedCohortDefinition,
                                 controlsPoolBaseOutcome,
                                 exposureDatesCurrentExposure,
@@ -357,10 +362,7 @@ performPairMatching <- function(exposedCohortDefinition,
 #'   (in days), and `outcome_status` (1 if event occurred, 0 if censored). 
 #'   Returns `NULL` if no valid survival data rows are generated.
 #'
-#' @importFrom dplyr filter select distinct pull inner_join left_join mutate arrange slice_head if_else
-#' @importFrom lubridate NA_Date_ years days
-#' @importFrom shiny showNotification
-#' @noRd
+#' @keywords internal
 calculatePairSurvival <- function(matchedDataFinal,
                                   cohortBaseForOutcome,
                                   outcomeDatesCurrentOutcome,

@@ -49,3 +49,4 @@ sampling principles. Matching is performed on gender (exact) and age
 exposed individual's index date. Controls must be free of both the specific
 exposure and outcome prior to the index date.
 }
+\keyword{internal}

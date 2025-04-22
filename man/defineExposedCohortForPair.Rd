@@ -40,3 +40,4 @@ pre-filtered (washout-applied) cohort. Ensures exposure occurs within
 the observation period and that the outcome (if present for the person)
 occurs strictly \emph{after} the exposure date.
 }
+\keyword{internal}

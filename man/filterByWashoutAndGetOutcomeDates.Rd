@@ -45,3 +45,4 @@ Individuals are kept in the filtered cohort if they either do not have the
 outcome or if their first occurrence is on or after the required washout
 period end date (relative to their observation start date).
 }
+\keyword{internal}
