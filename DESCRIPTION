@@ -1,10 +1,14 @@
 Package: Exposure2OutcomeSurv
 Title: Survival Analysis on Exposure and Outcome Condition Pairs
 Version: 0.0.0.9000
+Date: 2025-04-22
 Authors@R: 
     person("Sander", "Soodla", , "sandersoodla@gmail.com", role = c("aut", "cre"))
 Description: Shiny application for exploring exposure-outcome survival relationships using matched cohort data from an OMOP CDM. Uses Kaplan-Meier plots for visualisation and the Cox model to calculate Hazard Ratios.
 License: Apache License (>= 2)
+URL: https://github.com/sandersoodla/Exposure2OutcomeSurv,
+    https://sandersoodla.github.io/Exposure2OutcomeSurv/
+BugReports: https://github.com/sandersoodla/Exposure2OutcomeSurv/issues
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.2
@@ -28,4 +32,3 @@ Suggests:
     testthat,
     usethis,
     pkgdown
-URL: https://sandersoodla.github.io/Exposure2OutcomeSurv/
