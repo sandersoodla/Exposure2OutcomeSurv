@@ -324,7 +324,7 @@ app_server <- function(input, output, session) {
     
     
     # --- Generate KM plots and p-values ---
-    maxPlotTime <- 1825 # End plot at 5 years
+    maxPlotTime <- 2190 # End plot at 6 years
     
     # Get plotObject and pvalue for each pair
     kmResultsList <- generateKmPlotObjects(matchedSurvivalData, maxPlotTime) 
@@ -508,11 +508,20 @@ app_server <- function(input, output, session) {
   # --- Output: KM Summary Table ---
   output$kmSummaryTable <- DT::renderDataTable({
     req(loadedSummary())
-    summaryDf <- loadedSummary() 
+    summaryDf <- loadedSummary()
+    
+    # Create formatted CI column
+    summaryDf <- summaryDf %>%
+      dplyr::mutate(
+        hrCiLowerFormatted = format(round(hrCiLower, 3), nsmall = 3),
+        hrCiUpperFormatted = format(round(hrCiUpper, 3), nsmall = 3),
+        # Combine into a single string column
+        hrCI_combined = paste0(hrCiLowerFormatted, " - ", hrCiUpperFormatted)
+      )
     
     colsToSelect <- c(
       "exposureCondition", "outcomeCondition", 
-      "hazardRatio", "hrCiLower", "hrCiUpper", # HR and CI
+      "hazardRatio", "hrCI_combined",          # HR and CI
       "hrPvalueAdjHolm",                       # Adjusted HR P-value
       "kmPvalueAdjHolm",                       # Adjusted KM P-value 
       "nExposed", "nUnexposed", 
@@ -522,9 +531,9 @@ app_server <- function(input, output, session) {
     
     colNamesDisplay <- c(
       "Exposure", "Outcome", 
-      "HR", "HR CI Lower", "HR CI Upper", 
-      "HR P Adjusted (Holm)", 
-      "KM P Adjusted (Holm)", 
+      "HR", "HR CI (95%)", 
+      "HR p-val Adjusted (Holm)", 
+      "KM p-val Adjusted (Holm)", 
       "N Exposed", "N Unexposed", 
       "N Outcomes for Exposed", "N Outcomes for Unexposed",
       "PairKey" 
@@ -538,12 +547,13 @@ app_server <- function(input, output, session) {
       extensions = "Buttons",
       options = list(
         pageLength = 10,
-        layout = list(
-          topStart = "buttons",
-          topEnd = "search",
-          bottomStart = "info",
-          bottomEnd = "paging"
-        ),
+        #layout = list(
+        #  topStart = "buttons",
+        #  topEnd = "search",
+        #  bottomStart = "info",
+        #  bottomEnd = "paging"
+        #),
+        dom = "lBfrtip",
         buttons = c("copy", "csv", "excel"),
         columnDefs = list(
           # Hide pairKey column
@@ -551,7 +561,7 @@ app_server <- function(input, output, session) {
     )
     
     # Format number columns 
-    dt <- dt %>% DT::formatSignif(columns = c("hazardRatio", "hrCiLower", "hrCiUpper", "hrPvalueAdjHolm", "kmPvalueAdjHolm"), digits = 3) 
+    dt <- dt %>% DT::formatSignif(columns = c("hazardRatio", "hrPvalueAdjHolm", "kmPvalueAdjHolm"), digits = 3) 
     
     # Style based on significance
     dt <- dt %>% DT::formatStyle(columns = c("hrPvalueAdjHolm", "kmPvalueAdjHolm"), 

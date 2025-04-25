@@ -7,11 +7,17 @@ app_ui <- function(request) {
     
     fluidRow(
       column(
-        width = 11,
+        width = 10,
         # Application title
         titlePanel("Exposure to outcome condition survival analysis")
       ),
-      column(width = 1, textOutput("dbName"), textOutput("personCount"))
+      column(
+        width = 2,
+        align = "right",
+        icon("database"),
+        HTML("&nbsp;"),
+        textOutput("dbName", inline = TRUE),
+        textOutput("personCount"))
     ),
     
     
@@ -61,8 +67,8 @@ app_ui <- function(request) {
         textInput(
           "saveFileName",
           "Enter name for this result set:",
-          # Provide a default name, based on the date
-          value = paste0("km_results_", Sys.Date())
+          # Provide a default name, based on the datetime
+          value = paste0("surv_results_", format(Sys.time(), "%Y-%m-%d_%H%M%S"))
         ),
         
         # Button to trigger the KM calculation and saving process
@@ -95,8 +101,8 @@ app_ui <- function(request) {
       
       mainPanel(tabsetPanel(
         tabPanel(
-          "Exposure to Outcome KM",
-          h4("KM Analysis Summary"),
+          "Analysis Summary",
+          h4("Survival Analysis Summary"),
           p("Select one or more rows below to view plots."),
           
           # Output for the interactive summary table
@@ -104,12 +110,12 @@ app_ui <- function(request) {
           
           hr(),
           
-          h4("Selected KM Plots"),
+          h4("Selected Kaplan-Meier Plots"),
           
           # UI Output container where the server will dynamically generate the grid of plots
           uiOutput("kmPlotsUI")
         ),
-        tabPanel("Demographic overview", fluidRow(
+        tabPanel("Demographic Overview", fluidRow(
           column(6, uiOutput("startPyramidsUI")), column(6, uiOutput("targetPyramidsUI"))
         ), ),
         tabPanel(
