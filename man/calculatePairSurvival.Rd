@@ -8,7 +8,7 @@ calculatePairSurvival(
   matchedDataFinal,
   cohortBaseForOutcome,
   outcomeDatesCurrentOutcome,
-  session
+  session = NULL
 )
 }
 \arguments{
@@ -23,7 +23,7 @@ outcome washout, used to retrieve observation periods (\code{obs_start_date},
 \item{outcomeDatesCurrentOutcome}{A tibble containing \code{person_id} and
 \code{outcome_date} for the specific outcome being analyzed.}
 
-\item{session}{The Shiny session object (used for notifications).}
+\item{session}{Optional. The Shiny session object.}
 }
 \value{
 A tibble ready for survival analysis. Includes \code{person_id}, \code{set_id},

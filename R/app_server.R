@@ -327,7 +327,7 @@ app_server <- function(input, output, session) {
     maxPlotTime <- 2190 # End plot at 6 years
     
     # Get plotObject and pvalue for each pair
-    kmResultsList <- generateKmPlotObjects(matchedSurvivalData, maxPlotTime) 
+    kmResultsList <- generateKmPlotObjects(matchedSurvivalData, maxPlotTime, session) 
     
     if (is.null(kmResultsList)) { showNotification("Failed to generate KM plots.", type="error"); return() }
     

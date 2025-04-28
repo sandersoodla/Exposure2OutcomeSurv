@@ -14,8 +14,8 @@
 #'   Used for labeling results.
 #' @param matchRatio The target number of controls to match to each exposed person.
 #' @param washoutYears The washout period in years applied relative to each outcome.
-#' @param session The Shiny session object, passed down to helper functions
-#'   that require it for displaying notifications.
+#' @param session Optional. The Shiny session object. If provided, notifications
+#'   will be shown in the Shiny UI. Otherwise, messages are printed to the console.
 #'
 #' @return A list where names are unique keys for each processed exposure-outcome
 #'   pair (e.g., "pair_exposureID_outcomeID"). Each element of the list is itself
@@ -41,7 +41,7 @@ calculateMatchedSurvivalData <- function(selectedExposureIds,
                                          conceptLabelLookup,
                                          matchRatio = 4,
                                          washoutYears = 2,
-                                         session) {
+                                         session = NULL) {
   
   # --- 1. Input Validation ---
   if (missing(selectedExposureIds) || missing(selectedOutcomeIds) || missing(cdm) || missing(conceptLabelLookup) || missing(session)) {
@@ -56,9 +56,9 @@ calculateMatchedSurvivalData <- function(selectedExposureIds,
   
   # --- Initial Setup ---
   procMainId <- "proc_main_survival_calc"
-  showNotification("Starting Incidence Density Matching Analysis...", duration = NA, type="message", id = procMainId, session = session)
+  .notifyUser("Starting Matched Cohort Survival Analysis...", duration = NA, type="message", id = procMainId, session = session)
   # Ensure the main notification is removed when the function exits
-  on.exit(removeNotification(id = procMainId, session = session), add = TRUE)
+  on.exit(.removeUserNotify(id = procMainId, session = session), add = TRUE)
   
   
   # --- 2. Fetch Required Input Data ---
@@ -70,7 +70,7 @@ calculateMatchedSurvivalData <- function(selectedExposureIds,
   # Check if the list itself is NULL or if key components are NULL/empty
   if (is.null(baseDataResult) || is.null(baseDataResult$demographics) || is.null(baseDataResult$obsPeriods) ||
       nrow(baseDataResult$demographics) == 0 || nrow(baseDataResult$obsPeriods) == 0 ) {
-    showNotification("Critical error fetching base data or base data empty. Cannot proceed.", type="error", duration=10, session=session)
+    .notifyUser("Critical error fetching base data or base data empty. Cannot proceed.", type="error", duration=10, session=session)
     return(NULL)
   }
   demographicsBase <- baseDataResult$demographics
@@ -84,7 +84,7 @@ calculateMatchedSurvivalData <- function(selectedExposureIds,
     dplyr::inner_join(obsPeriods, by = "person_id")
   
   if (is.null(fullCohortBase) || nrow(fullCohortBase) == 0) {
-    showNotification("Initial cohort base is empty after combining demographics and observation periods. Cannot proceed.", type = "error", duration=10, session=session)
+    .notifyUser("Initial cohort base is empty after combining demographics and observation periods. Cannot proceed.", type = "error", duration=10, session=session)
     return(NULL)
   }
   
@@ -96,7 +96,7 @@ calculateMatchedSurvivalData <- function(selectedExposureIds,
   for (outcomeId in selectedOutcomeIds) {
     outcomeIdStr <- as.character(outcomeId)
     prepOutcomeNotifId <- paste0("prep_outcome_", outcomeIdStr)
-    showNotification(paste("Preparing analysis for Outcome ID:", outcomeIdStr), duration = NA, id = prepOutcomeNotifId, session = session)
+    .notifyUser(paste("Preparing analysis for Outcome ID:", outcomeIdStr), duration = NA, id = prepOutcomeNotifId, session = session)
     
     # --- 5a. Filter by Washout & Get Outcome Dates ---
 
@@ -113,18 +113,18 @@ calculateMatchedSurvivalData <- function(selectedExposureIds,
     
     # Check if cohort is usable after washout
     if (is.null(cohortBaseForOutcome) || nrow(cohortBaseForOutcome) == 0) {
-      removeNotification(id = prepOutcomeNotifId, session = session)
+      .removeUserNotify(id = prepOutcomeNotifId, session = session)
       next # Skip to the next outcomeId
     }
     
-    showNotification(paste("Eligible persons for Outcome ID", outcomeIdStr, "after washout:", nrow(cohortBaseForOutcome)), type="message", duration=3, session = session)
+    .notifyUser(paste("Eligible persons for Outcome ID", outcomeIdStr, "after washout:", nrow(cohortBaseForOutcome)), type="message", duration=3, session = session)
     
     # Prepare potential controls pool base for this specific outcome loop
     controlsPoolBaseOutcome <- cohortBaseForOutcome %>%
       dplyr::select(dplyr::all_of(c("person_id", "year_of_birth", "gender_concept_id", "obs_start_date", "obs_end_date"))) %>%
       dplyr::left_join(outcomeDatesCurrentOutcome, by = "person_id") # Add this outcome's date
     
-    removeNotification(id = prepOutcomeNotifId, session = session) # Done preparing for this outcome
+    .removeUserNotify(id = prepOutcomeNotifId, session = session) # Done preparing for this outcome
     
     # --- 6. Inner Loop: Iterate through each selected Exposure condition ---
     for (exposureId in selectedExposureIds) {
@@ -132,8 +132,8 @@ calculateMatchedSurvivalData <- function(selectedExposureIds,
       uniquePairKey <- paste0("pair_", exposureIdStr, "_", outcomeIdStr)
       procPairNotifId <- paste0("proc_pair_", uniquePairKey)
       
-      on.exit(removeNotification(id = procPairNotifId, session = session), add = TRUE, after = FALSE) # Ensure removal on exit from this iteration block
-      showNotification(paste("Processing Exposure ID:", exposureIdStr, "for Outcome ID:", outcomeIdStr), duration = NA, id = procPairNotifId, session = session)
+      on.exit(.removeUserNotify(id = procPairNotifId, session = session), add = TRUE, after = FALSE) # Ensure removal on exit from this iteration block
+      .notifyUser(paste("Processing Exposure ID:", exposureIdStr, "for Outcome ID:", outcomeIdStr), duration = NA, id = procPairNotifId, session = session)
       
       # --- 6a. Define Exposed Cohort for this Pair ---
       exposedResult <- defineExposedCohortForPair(
@@ -149,7 +149,7 @@ calculateMatchedSurvivalData <- function(selectedExposureIds,
       
       # Check if any exposed individuals were found
       if (is.null(exposedCohortDefinition) || nrow(exposedCohortDefinition) == 0) {
-        removeNotification(id = procPairNotifId, session = session)
+        .removeUserNotify(id = procPairNotifId, session = session)
         on.exit(NULL) # Clear the specific on.exit for this pair notification
         next # Skip to next exposureId
       }
@@ -172,7 +172,7 @@ calculateMatchedSurvivalData <- function(selectedExposureIds,
       
       # Check if matching was successful
       if (is.null(matchedDataFinal) || nrow(matchedDataFinal) == 0) {
-        removeNotification(id = procPairNotifId, session = session)
+        .removeUserNotify(id = procPairNotifId, session = session)
         on.exit(NULL) # Clear the specific on.exit for this pair notification
         next # Skip survival calculation if no sets
       }
@@ -205,25 +205,25 @@ calculateMatchedSurvivalData <- function(selectedExposureIds,
           nUnexposedMatched = sum(survivalDataCurrentPair$exposure_status == 0),
           nTotalPersonsInAnalysis = nrow(survivalDataCurrentPair)
         )
-        showNotification(paste("Survival results processed for Exposure:", exposureIdStr, "Outcome:", outcomeIdStr), duration = 3, type = "message", session = session)
+        .notifyUser(paste("Survival results processed for Exposure:", exposureIdStr, "Outcome:", outcomeIdStr), duration = 3, type = "message", session = session)
       }
       
       # Remove the notification for this specific pair after processing it
-      removeNotification(id = procPairNotifId, session = session)
+      .removeUserNotify(id = procPairNotifId, session = session)
       on.exit(NULL) # Clear the specific on.exit handler for this pair's notification
       
     } # End inner loop (exposures)
   } # End outer loop (outcomes)
   
   # --- 7. Final Check and Return ---
-  removeNotification(id = procMainId, session = session) # Remove the main processing notification manually
+  .removeUserNotify(id = procMainId, session = session) # Remove the main processing notification manually
   on.exit(NULL) # Clear the main on.exit handler
   
   if (length(resultsList) == 0) {
-    showNotification("Processing complete, but no valid results could be generated for any exposure-outcome pair.", type="warning", duration = 10, session = session)
+    .notifyUser("Processing complete, but no valid results could be generated for any exposure-outcome pair.", type="warning", duration = 10, session = session)
     return(NULL)
   } else {
-    showNotification(paste("Incidence Density Matching complete. Results generated for", length(resultsList), "pairs."), type="message", duration = 8, session = session)
+    .notifyUser(paste("Incidence Density Matching complete. Results generated for", length(resultsList), "pairs."), type="message", duration = 8, session = session)
     return(resultsList)
   }
 }

@@ -4,7 +4,7 @@
 \alias{fetchDataForSurvAnalysis}
 \title{Fetch Base Data for Survival Analysis}
 \usage{
-fetchDataForSurvAnalysis(cdm, allConceptIdsToFetch, session)
+fetchDataForSurvAnalysis(cdm, allConceptIdsToFetch, session = NULL)
 }
 \arguments{
 \item{cdm}{A CDM reference object created by \code{CDMConnector::cdmFromCon}.}
@@ -12,7 +12,8 @@ fetchDataForSurvAnalysis(cdm, allConceptIdsToFetch, session)
 \item{allConceptIdsToFetch}{A numeric vector of all exposure and outcome
 concept IDs for which to fetch first occurrence dates.}
 
-\item{session}{The Shiny session object (used for notifications).}
+\item{session}{Optional. The Shiny session object. If provided, notifications
+will be shown in the Shiny UI. Otherwise, messages are printed to the console.}
 }
 \value{
 A list containing:

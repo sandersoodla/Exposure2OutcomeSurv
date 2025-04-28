@@ -11,7 +11,7 @@ performPairMatching(
   matchRatio,
   exposureId,
   outcomeId,
-  session
+  session = NULL
 )
 }
 \arguments{
@@ -32,7 +32,7 @@ pool (passed outcome washout), containing \code{person_id}, \code{year_of_birth}
 
 \item{outcomeId}{The numeric concept ID of the outcome (for notifications).}
 
-\item{session}{The Shiny session object (used for notifications).}
+\item{session}{Optional. The Shiny session object.}
 }
 \value{
 A list containing:

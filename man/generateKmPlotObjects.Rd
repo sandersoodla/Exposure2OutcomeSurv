@@ -4,11 +4,7 @@
 \alias{generateKmPlotObjects}
 \title{Generate Kaplan-Meier Plot Objects for Matched Pairs}
 \usage{
-generateKmPlotObjects(
-  matchedSurvivalData,
-  maxPlotTime = 1825,
-  session = shiny::getDefaultReactiveDomain()
-)
+generateKmPlotObjects(matchedSurvivalData, maxPlotTime = 1825, session = NULL)
 }
 \arguments{
 \item{matchedSurvivalData}{A list structured generally like the output of
@@ -21,9 +17,8 @@ exposure-outcome pair and is itself a list that must contain at least:
 \item{maxPlotTime}{Numeric. The maximum time (in days, starting from index date)
 to display on the x-axis of the Kaplan-Meier plots. Defaults to 1825 (~5 years).}
 
-\item{session}{The Shiny session object, used for displaying progress
-notifications. Defaults to \code{shiny::getDefaultReactiveDomain()} which works
-when called within a reactive context.}
+\item{session}{Optional. The Shiny session object. If provided, notifications
+will be shown in the Shiny UI. Otherwise, messages are printed to the console.}
 }
 \value{
 A list named by the unique exposure-outcome pair keys present in

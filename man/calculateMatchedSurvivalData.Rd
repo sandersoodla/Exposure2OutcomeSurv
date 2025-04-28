@@ -11,7 +11,7 @@ calculateMatchedSurvivalData(
   conceptLabelLookup,
   matchRatio = 4,
   washoutYears = 2,
-  session
+  session = NULL
 )
 }
 \arguments{
@@ -30,8 +30,8 @@ Used for labeling results.}
 
 \item{washoutYears}{The washout period in years applied relative to each outcome.}
 
-\item{session}{The Shiny session object, passed down to helper functions
-that require it for displaying notifications.}
+\item{session}{Optional. The Shiny session object. If provided, notifications
+will be shown in the Shiny UI. Otherwise, messages are printed to the console.}
 }
 \value{
 A list where names are unique keys for each processed exposure-outcome

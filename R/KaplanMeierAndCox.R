@@ -12,9 +12,8 @@
 #'   `$exposureLabel`, `$outcomeLabel`.
 #' @param maxPlotTime Numeric. The maximum time (in days, starting from index date)
 #'   to display on the x-axis of the Kaplan-Meier plots. Defaults to 1825 (~5 years).
-#' @param session The Shiny session object, used for displaying progress
-#'   notifications. Defaults to `shiny::getDefaultReactiveDomain()` which works
-#'   when called within a reactive context.
+#' @param session Optional. The Shiny session object. If provided, notifications
+#'   will be shown in the Shiny UI. Otherwise, messages are printed to the console.
 #'
 #' @return A list named by the unique exposure-outcome pair keys present in
 #'   `matchedSurvivalData`. Each element is a list containing:
@@ -25,24 +24,22 @@
 #'   Returns an empty list if `matchedSurvivalData` is NULL or empty.
 #' 
 #' @keywords internal
-generateKmPlotObjects <- function(matchedSurvivalData, maxPlotTime = 1825, session = shiny::getDefaultReactiveDomain()) {
-  shiny::req(matchedSurvivalData)
+generateKmPlotObjects <- function(matchedSurvivalData, maxPlotTime = 1825, session = NULL) {
+  if (is.null(matchedSurvivalData)) return(list())
   
   numPairs <- length(matchedSurvivalData)
   
   # Show initial notification for plot generation
   notificationId <- "km_plot_progress" # Unique ID for this notification
-  if (!is.null(session)) {
-    shiny::showNotification(
-      paste("Starting KM plot generation for", numPairs, "pairs..."), 
-      duration = NA, # Keep open until removed
-      id = notificationId, 
-      type = "message",
-      session = session
-    )
-    # Ensure notification is removed when function exits (even on error)
-    on.exit(shiny::removeNotification(id = notificationId), add = TRUE) 
-  }
+  .notifyUser(
+    paste("Starting KM plot generation for", numPairs, "pairs..."), 
+    duration = NA, # Keep open until removed
+    id = notificationId, 
+    type = "message",
+    session = session
+  )
+  # Ensure notification is removed when function exits (even on error)
+  on.exit(.removeUserNotify(id = notificationId, session), add = TRUE) 
   
   # Create an empty list to store plots and tables. Use names that indicate the pair.
   plotsList <- list()
@@ -53,15 +50,13 @@ generateKmPlotObjects <- function(matchedSurvivalData, maxPlotTime = 1825, sessi
     plotCounter <- plotCounter + 1 # Increment counter
     
     # Update progress notification
-    if (!is.null(session)) {
-      shiny::showNotification(
-        paste0("Generating plot ", plotCounter, " of ", numPairs, ": ", pairKey), 
-        duration = NA, 
-        id = notificationId,
-        type = "message",
-        session = session
-      )
-    }
+    .notifyUser(
+      paste0("Generating plot ", plotCounter, " of ", numPairs, ": ", pairKey), 
+      duration = NA, 
+      id = notificationId,
+      type = "message",
+      session = session
+    )
     
     # Extract the result list for the current pair
     pairResult <- matchedSurvivalData[[pairKey]]
@@ -156,7 +151,7 @@ generateKmPlotObjects <- function(matchedSurvivalData, maxPlotTime = 1825, sessi
 #'
 #' @keywords internal
 calculateCoxResults <- function(matchedSurvivalData) {
-  shiny::req(matchedSurvivalData)
+  if (is.null(matchedSurvivalData)) return(list())
   
   coxResultsList <- list()
   

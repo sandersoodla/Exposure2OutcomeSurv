@@ -9,7 +9,7 @@ defineExposedCohortForPair(
   allConditionFirstDates,
   outcomeDatesCurrentOutcome,
   exposureId,
-  session
+  session = NULL
 )
 }
 \arguments{
@@ -24,7 +24,7 @@ for the specific outcome being analyzed in the current loop iteration.}
 
 \item{exposureId}{The numeric concept ID of the exposure condition.}
 
-\item{session}{The Shiny session object (used for notifications).}
+\item{session}{Optional. The Shiny session object.}
 }
 \value{
 A list containing:
