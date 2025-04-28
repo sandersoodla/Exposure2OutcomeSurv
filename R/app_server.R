@@ -14,7 +14,7 @@ app_server <- function(input, output, session) {
   WRITE_SCHEMA <- Sys.getenv("WRITE_SCHEMA")
   
   
-  if (DBMS == "duckdb") {
+  if (tolower(DBMS) == "duckdb") {
     connection <- DBI::dbConnect(duckdb::duckdb(), dbdir = DATABASE)
     cdm <- CDMConnector::cdmFromCon(connection, cdmSchema = CDM_SCHEMA, writeSchema = WRITE_SCHEMA)
     
@@ -27,7 +27,7 @@ app_server <- function(input, output, session) {
       port = DB_PORT
     )
     connection <- DatabaseConnector::connect(connectionDetails)
-    cdm <- CDMConnector::cdmFromCon(connection, cdmSchema = CDM_SCHEMA, writeSchema = WRITE_SCHEMA, cdmName = "maitt_cdm")
+    cdm <- CDMConnector::cdmFromCon(connection, cdmSchema = CDM_SCHEMA, writeSchema = WRITE_SCHEMA, cdmName = Sys.getenv("DB_NAME"))
     
   }
   

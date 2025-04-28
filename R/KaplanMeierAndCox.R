@@ -106,7 +106,7 @@ generateKmPlotObjects <- function(matchedSurvivalData, maxPlotTime = 1825, sessi
       ylab = "Outcome-free probability",
       xlim = c(0, maxPlotTime), # Limit x to max plot time
       ylim = dynamicYLim, # Use dynamic y-limit
-      break.time.by = 400,
+      break.time.by = 365,
       tables.y.text = FALSE
     ) 
     

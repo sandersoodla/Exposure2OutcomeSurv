@@ -44,7 +44,7 @@ calculateMatchedSurvivalData <- function(selectedExposureIds,
                                          session = NULL) {
   
   # --- 1. Input Validation ---
-  if (missing(selectedExposureIds) || missing(selectedOutcomeIds) || missing(cdm) || missing(conceptLabelLookup) || missing(session)) {
+  if (missing(selectedExposureIds) || missing(selectedOutcomeIds) || missing(cdm) || missing(conceptLabelLookup)) {
     stop("calculateMatchedSurvivalData: Missing required arguments.")
   }
   if (!is.numeric(selectedExposureIds) || !is.numeric(selectedOutcomeIds)) stop("selectedExposureIds and selectedOutcomeIds must be numeric vectors.")
@@ -141,6 +141,7 @@ calculateMatchedSurvivalData <- function(selectedExposureIds,
         allConditionFirstDates = allConditionFirstDates,
         outcomeDatesCurrentOutcome = outcomeDatesCurrentOutcome,
         exposureId = exposureId,
+        outcomeId = outcomeId,
         session = session
       )
       

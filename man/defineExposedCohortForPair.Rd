@@ -9,6 +9,7 @@ defineExposedCohortForPair(
   allConditionFirstDates,
   outcomeDatesCurrentOutcome,
   exposureId,
+  outcomeId,
   session = NULL
 )
 }
@@ -24,6 +25,8 @@ for the specific outcome being analyzed in the current loop iteration.}
 
 \item{exposureId}{The numeric concept ID of the exposure condition.}
 
+\item{outcomeId}{The numeric concept ID of the outcome condition.}
+
 \item{session}{Optional. The Shiny session object.}
 }
 \value{
@@ -32,7 +35,8 @@ A list containing:
 \item{exposed}{A tibble defining the exposed cohort for this pair. Contains unique exposure events (\code{exposed_person_id}, \code{index_date}, \code{year_of_birth}, \code{gender_concept_id}) meeting the criteria.}
 \item{exposureDates}{A tibble with \code{person_id} and \code{exposure_date} (first occurrence) for the specific \code{exposureId} among the \code{cohortBaseForOutcome}.}
 }
-Returns \code{NULL} for \code{exposed} if no valid exposed individuals are found.
+Returns \code{NULL} for \code{exposed} if no valid exposed individuals are found or
+\code{NULL}for both \code{exposed} and \code{exposureDates} if \code{cohortBaseForOutcome} is null or empty
 }
 \description{
 Identifies individuals exposed to a specific condition within a

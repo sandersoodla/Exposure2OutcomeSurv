@@ -138,6 +138,7 @@ filterByWashoutAndGetOutcomeDates <- function(cohortBase, allConditionDates, out
     unique()
   
   if (length(eligiblePersonsIds) == 0) {
+    outcomeIdStr = as.character(outcomeId)
     .notifyUser(paste("No persons eligible for Outcome ID:", outcomeIdStr, "after applying", washoutYears, "-year washout."),
                      type = "warning", duration = 5)
     return(list(cohortEligible = tibble::tibble(), outcomeDates = outcomeDatesCurrentOutcome))
@@ -168,6 +169,7 @@ filterByWashoutAndGetOutcomeDates <- function(cohortBase, allConditionDates, out
 #' @param outcomeDatesCurrentOutcome A tibble with `person_id` and `outcome_date`
 #'   for the specific outcome being analyzed in the current loop iteration.
 #' @param exposureId The numeric concept ID of the exposure condition.
+#' @param outcomeId The numeric concept ID of the outcome condition.
 #' @param session Optional. The Shiny session object.
 #'
 #' @return A list containing:
@@ -175,16 +177,23 @@ filterByWashoutAndGetOutcomeDates <- function(cohortBase, allConditionDates, out
 #'     \item{exposed}{A tibble defining the exposed cohort for this pair. Contains unique exposure events (`exposed_person_id`, `index_date`, `year_of_birth`, `gender_concept_id`) meeting the criteria.}
 #'     \item{exposureDates}{A tibble with `person_id` and `exposure_date` (first occurrence) for the specific `exposureId` among the `cohortBaseForOutcome`.}
 #'   }
-#' Returns `NULL` for `exposed` if no valid exposed individuals are found.
+#' Returns `NULL` for `exposed` if no valid exposed individuals are found or
+#' `NULL`for both `exposed` and `exposureDates` if `cohortBaseForOutcome` is null or empty
 #'
 #' @keywords internal
 defineExposedCohortForPair <- function(cohortBaseForOutcome,
                                        allConditionFirstDates,
                                        outcomeDatesCurrentOutcome,
                                        exposureId,
+                                       outcomeId,
                                        session = NULL) {
   
+  if (is.null(cohortBaseForOutcome) || nrow(cohortBaseForOutcome) == 0) {
+    return(list(exposed = NULL, exposureDates = NULL))
+    
+  }
   exposureIdStr <- as.character(exposureId) # For messages
+  outcomeIdStr <- as.character(outcomeId)
   
   # Find first exposure date among persons eligible for this outcome
   exposureDatesCurrentExposure <- allConditionFirstDates %>%
@@ -256,6 +265,10 @@ performPairMatching <- function(exposedCohortDefinition,
                                 exposureId,
                                 outcomeId,
                                 session = NULL) {
+  
+  if (is.null(exposedCohortDefinition) || nrow(exposedCohortDefinition) == 0) {
+    return(list(matchedData = NULL, nMatchedExposed = 0))
+  }
   
   uniquePairKey <- paste0("pair_", exposureId, "_", outcomeId)
   matchProgId <- paste0("match_prog_", uniquePairKey)
@@ -366,6 +379,10 @@ calculatePairSurvival <- function(matchedDataFinal,
                                   cohortBaseForOutcome,
                                   outcomeDatesCurrentOutcome,
                                   session = NULL) {
+  
+  if (is.null(matchedDataFinal) || nrow(matchedDataFinal) == 0) {
+    return(NULL)
+  }
   
   # Prepare base for survival calculation (matched individuals + obs periods)
   survivalInputBase <- matchedDataFinal %>%
