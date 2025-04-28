@@ -52,7 +52,8 @@ occurs strictly <em>after</em> the exposure date.</p>
 <span>  <span class="va">allConditionFirstDates</span>,</span>
 <span>  <span class="va">outcomeDatesCurrentOutcome</span>,</span>
 <span>  <span class="va">exposureId</span>,</span>
-<span>  <span class="va">session</span></span>
+<span>  <span class="va">outcomeId</span>,</span>
+<span>  session <span class="op">=</span> <span class="cn">NULL</span></span>
 <span><span class="op">)</span></span></code></pre></div>
     </div>
 
@@ -79,8 +80,12 @@ for the specific outcome being analyzed in the current loop iteration.</p></dd>
 <dd><p>The numeric concept ID of the exposure condition.</p></dd>
 
 
+<dt id="arg-outcomeid">outcomeId<a class="anchor" aria-label="anchor" href="#arg-outcomeid"></a></dt>
+<dd><p>The numeric concept ID of the outcome condition.</p></dd>
+
+
 <dt id="arg-session">session<a class="anchor" aria-label="anchor" href="#arg-session"></a></dt>
-<dd><p>The Shiny session object (used for notifications).</p></dd>
+<dd><p>Optional. The Shiny session object.</p></dd>
 
 </dl></div>
     <div class="section level2">
@@ -92,7 +97,8 @@ for the specific outcome being analyzed in the current loop iteration.</p></dd>
 <dd><p>A tibble with <code>person_id</code> and <code>exposure_date</code> (first occurrence) for the specific <code>exposureId</code> among the <code>cohortBaseForOutcome</code>.</p></dd>
 
 
-</dl><p>Returns <code>NULL</code> for <code>exposed</code> if no valid exposed individuals are found.</p>
+</dl><p>Returns <code>NULL</code> for <code>exposed</code> if no valid exposed individuals are found or
+<code>NULL</code>for both <code>exposed</code> and <code>exposureDates</code> if <code>cohortBaseForOutcome</code> is null or empty</p>
     </div>
 
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>

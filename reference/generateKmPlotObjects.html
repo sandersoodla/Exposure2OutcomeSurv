@@ -44,11 +44,7 @@ survival data. Adjusts plot limits dynamically.</p>
 
     <div class="section level2">
     <h2 id="ref-usage">Usage<a class="anchor" aria-label="anchor" href="#ref-usage"></a></h2>
-    <div class="sourceCode"><pre class="sourceCode r"><code><span><span class="fu">generateKmPlotObjects</span><span class="op">(</span></span>
-<span>  <span class="va">matchedSurvivalData</span>,</span>
-<span>  maxPlotTime <span class="op">=</span> <span class="fl">1825</span>,</span>
-<span>  session <span class="op">=</span> <span class="fu">shiny</span><span class="fu">::</span><span class="fu"><a href="https://rdrr.io/pkg/shiny/man/domains.html" class="external-link">getDefaultReactiveDomain</a></span><span class="op">(</span><span class="op">)</span></span>
-<span><span class="op">)</span></span></code></pre></div>
+    <div class="sourceCode"><pre class="sourceCode r"><code><span><span class="fu">generateKmPlotObjects</span><span class="op">(</span><span class="va">matchedSurvivalData</span>, maxPlotTime <span class="op">=</span> <span class="fl">1825</span>, session <span class="op">=</span> <span class="cn">NULL</span><span class="op">)</span></span></code></pre></div>
     </div>
 
     <div class="section level2">
@@ -70,9 +66,8 @@ to display on the x-axis of the Kaplan-Meier plots. Defaults to 1825 (~5 years).
 
 
 <dt id="arg-session">session<a class="anchor" aria-label="anchor" href="#arg-session"></a></dt>
-<dd><p>The Shiny session object, used for displaying progress
-notifications. Defaults to <code><a href="https://rdrr.io/pkg/shiny/man/domains.html" class="external-link">shiny::getDefaultReactiveDomain()</a></code> which works
-when called within a reactive context.</p></dd>
+<dd><p>Optional. The Shiny session object. If provided, notifications
+will be shown in the Shiny UI. Otherwise, messages are printed to the console.</p></dd>
 
 </dl></div>
     <div class="section level2">
