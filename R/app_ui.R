@@ -14,12 +14,20 @@ app_ui <- function(request) {
       column(
         width = 2,
         align = "right",
+        
         icon("database"),
         HTML("&nbsp;"),
         textOutput("dbName", inline = TRUE),
-        textOutput("personCount"))
+        
+        HTML("<br>"),
+        
+        tags$span(
+          icon("users"),
+          HTML("&nbsp;"),
+          textOutput("personCount", inline = TRUE)
+        )
+      )
     ),
-    
     
     sidebarLayout(
       sidebarPanel(

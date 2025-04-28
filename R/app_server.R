@@ -42,7 +42,7 @@ app_server <- function(input, output, session) {
   req(metadata, cancelOutput = TRUE)
   
   output$dbName <- renderText(metadata$dbName)
-  output$personCount <- renderText(paste("n = ", metadata$personCount))
+  output$personCount <- renderText(metadata$personCount)
   
   
   ######### CONDITION INPUT
