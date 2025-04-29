@@ -13,7 +13,7 @@
 #'   `concept_id` and `concept_name_id` (where `concept_name_id` holds the label).
 #'   Used for labeling results.
 #' @param matchRatio The target number of controls to match to each exposed person.
-#' @param washoutYears The washout period in years applied relative to each outcome.
+#' @param washoutYears The washout period in years applied to each exposure and outcome.
 #' @param session Optional. The Shiny session object. If provided, notifications
 #'   will be shown in the Shiny UI. Otherwise, messages are printed to the console.
 #'
@@ -26,7 +26,7 @@
 #'     \item{outcomeId}{Numeric ID of the outcome.}
 #'     \item{exposureLabel}{Character label for the exposure (from `conceptLabelLookup`).}
 #'     \item{outcomeLabel}{Character label for the outcome (from `conceptLabelLookup`).}
-#'     \item{nExposedIncludedInMatching}{Count of exposed individuals after checking for prior outcomes.}
+#'     \item{nExposedIncludedInMatching}{Count of exposed individuals eligible for matching after applying outcome washout, exposure washout, observation period checks, and ensuring no outcome before exposure.}
 #'     \item{nExposedMatched}{Count of exposed individuals successfully matched to >=1 control.}
 #'     \item{nUnexposedMatched}{Total count of matched unexposed controls.}
 #'     \item{nTotalPersonsInAnalysis}{Total number of rows (persons) in the final `survivalData` for the pair.}
@@ -98,7 +98,7 @@ calculateMatchedSurvivalData <- function(selectedExposureIds,
     prepOutcomeNotifId <- paste0("prep_outcome_", outcomeIdStr)
     .notifyUser(paste("Preparing analysis for Outcome ID:", outcomeIdStr), duration = NA, id = prepOutcomeNotifId, session = session)
     
-    # --- 5a. Filter by Washout & Get Outcome Dates ---
+    # --- 5a. Filter by Outcome Washout & Get Outcome Dates ---
 
     washoutFilterResult <- filterByWashoutAndGetOutcomeDates(
       cohortBase = fullCohortBase,
@@ -142,6 +142,7 @@ calculateMatchedSurvivalData <- function(selectedExposureIds,
         outcomeDatesCurrentOutcome = outcomeDatesCurrentOutcome,
         exposureId = exposureId,
         outcomeId = outcomeId,
+        washoutYears = washoutYears,
         session = session
       )
       
@@ -157,10 +158,21 @@ calculateMatchedSurvivalData <- function(selectedExposureIds,
       
       nExposedIdentifiedInitial <- nrow(exposedCohortDefinition) # Exposed after prior outcome check
       
-      # --- 6b. Perform Matching for this Pair ---
+      
+      # --- 6b. Define Controls Pool where matched patients are selected from ---
+      controlsPoolForPair <- controlsPoolBaseOutcome %>%
+        dplyr::left_join(exposureDatesCurrentExposure, by = "person_id") %>%
+        dplyr::mutate(washout_end_date = obs_start_date %m+% lubridate::years(washoutYears)) %>%
+        # Keep if exposure is NA OR occurs ON or AFTER washout period end date
+        dplyr::filter(is.na(exposure_date) | exposure_date >= washout_end_date) %>%
+        # Select final columns needed for the matching pool
+        dplyr::select(person_id, year_of_birth, gender_concept_id, obs_start_date, obs_end_date, outcome_date)
+      
+      
+      # --- 6c. Perform Matching for this Pair ---
       matchingResult <- performPairMatching(
         exposedCohortDefinition = exposedCohortDefinition,
-        controlsPoolBaseOutcome = controlsPoolBaseOutcome,
+        controlsPool = controlsPoolForPair,
         exposureDatesCurrentExposure = exposureDatesCurrentExposure,
         matchRatio = matchRatio,
         exposureId = exposureId,
@@ -179,7 +191,7 @@ calculateMatchedSurvivalData <- function(selectedExposureIds,
       }
       # Matching complete notification shown by helper
       
-      # --- 6c. Calculate Survival for this Matched Pair ---
+      # --- 6d. Calculate Survival for this Matched Pair ---
       survivalDataCurrentPair <- calculatePairSurvival(
         matchedDataFinal = matchedDataFinal,
         cohortBaseForOutcome = cohortBaseForOutcome,
@@ -187,7 +199,7 @@ calculateMatchedSurvivalData <- function(selectedExposureIds,
         session = session
       )
       
-      # --- 6d. Store Results if Survival Data is Valid ---
+      # --- 6e. Store Results if Survival Data is Valid ---
       # Check if the returned tibble is valid (not NULL) and has rows
       if (!is.null(survivalDataCurrentPair) && nrow(survivalDataCurrentPair) > 0) {
         # Lookup labels, provide fallback if not found

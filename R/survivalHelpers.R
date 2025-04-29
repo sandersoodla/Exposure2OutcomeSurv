@@ -81,7 +81,7 @@ fetchDataForSurvAnalysis <- function(cdm, allConceptIdsToFetch, session = NULL) 
 
 
 
-#' Filter Cohort by Washout and Get Corresponding Outcome Dates
+#' Filter Cohort by Outcome Washout and Get Corresponding Outcome Dates
 #'
 #' Filters a base cohort based on a washout period for a specific outcome ID.
 #' It also extracts and returns a table containing the first occurrence dates
@@ -157,10 +157,11 @@ filterByWashoutAndGetOutcomeDates <- function(cohortBase, allConditionDates, out
 
 #' Define Exposed Cohort for a Specific Exposure-Outcome Pair
 #'
-#' Identifies individuals exposed to a specific condition within a
-#' pre-filtered (washout-applied) cohort. Ensures exposure occurs within
-#' the observation period and that the outcome (if present for the person)
-#' occurs strictly *after* the exposure date.
+#' Identifies individuals exposed to a specific condition (`exposureId`) from a
+#' base cohort (already filtered by outcome washout), ensuring their exposure
+#' occurs AFTER the specified washout period relative to observation start,
+#' and BEFORE any occurrence of the specified outcome condition (`outcomeId`).
+#' Returns the filtered exposed cohort table and their exposure dates.
 #'
 #' @param cohortBaseForOutcome A tibble representing the cohort that has already
 #'   passed the outcome-specific washout, as returned by `filterByWashoutAndGetOutcomeDates`.
@@ -170,6 +171,8 @@ filterByWashoutAndGetOutcomeDates <- function(cohortBase, allConditionDates, out
 #'   for the specific outcome being analyzed in the current loop iteration.
 #' @param exposureId The numeric concept ID of the exposure condition.
 #' @param outcomeId The numeric concept ID of the outcome condition.
+#' @param washoutYears The washout period in years. Exposure must occur on or after
+#'   `obs_start_date + washoutYears`.
 #' @param session Optional. The Shiny session object.
 #'
 #' @return A list containing:
@@ -186,6 +189,7 @@ defineExposedCohortForPair <- function(cohortBaseForOutcome,
                                        outcomeDatesCurrentOutcome,
                                        exposureId,
                                        outcomeId,
+                                       washoutYears,
                                        session = NULL) {
   
   if (is.null(cohortBaseForOutcome) || nrow(cohortBaseForOutcome) == 0) {
@@ -204,7 +208,11 @@ defineExposedCohortForPair <- function(cohortBaseForOutcome,
   # Identify exposed individuals from the outcome-specific eligible cohort
   exposedCohortDefinition <- cohortBaseForOutcome %>%
     dplyr::inner_join(exposureDatesCurrentExposure, by = "person_id") %>%
-    dplyr::left_join(outcomeDatesCurrentOutcome, by = "person_id") %>% # Join specific outcome dates again
+    # Apply exposure washout
+    dplyr::mutate(washout_end_date = obs_start_date %m+% lubridate::years(washoutYears)) %>%
+    dplyr::filter(exposure_date >= washout_end_date) %>%
+  
+    dplyr::left_join(outcomeDatesCurrentOutcome, by = "person_id") %>% # Join specific outcome dates
     dplyr::filter(!is.na(exposure_date)) %>%
     # Keep only the observation period where the exposure happened
     dplyr::filter(exposure_date >= obs_start_date & exposure_date <= obs_end_date) %>%
@@ -240,8 +248,8 @@ defineExposedCohortForPair <- function(cohortBaseForOutcome,
 #' @param exposedCohortDefinition A tibble of exposed individuals eligible for
 #'   matching, as returned by `defineExposedCohortForPair`. Must contain
 #'   `exposed_person_id`, `index_date`, `year_of_birth`, `gender_concept_id`.
-#' @param controlsPoolBaseOutcome A tibble representing the potential control
-#'   pool (passed outcome washout), containing `person_id`, `year_of_birth`,
+#' @param controlsPool A tibble representing the potential control
+#'   pool (passed washout), containing `person_id`, `year_of_birth`,
 #'   `gender_concept_id`, `obs_start_date`, `obs_end_date`, and potentially `outcome_date`.
 #' @param exposureDatesCurrentExposure A tibble containing `person_id` and
 #'   `exposure_date` for the specific exposure being matched.
@@ -259,7 +267,7 @@ defineExposedCohortForPair <- function(cohortBaseForOutcome,
 #'
 #' @keywords internal
 performPairMatching <- function(exposedCohortDefinition,
-                                controlsPoolBaseOutcome,
+                                controlsPool,
                                 exposureDatesCurrentExposure,
                                 matchRatio,
                                 exposureId,
@@ -274,7 +282,7 @@ performPairMatching <- function(exposedCohortDefinition,
   matchProgId <- paste0("match_prog_", uniquePairKey)
   
   # Prepare potential controls pool by adding exposure date info
-  potentialControlsPool <- controlsPoolBaseOutcome %>%
+  potentialControlsPool <- controlsPool %>%
     dplyr::left_join(exposureDatesCurrentExposure, by="person_id")
   
   matchedSetsList <- list()

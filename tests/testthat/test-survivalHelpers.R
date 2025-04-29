@@ -110,10 +110,10 @@ test_that("defineExposedCohortForPair works correctly", {
   allConditionFirstDates <- tibble::tribble(
     ~person_id, ~concept_id, ~condition_start_date,
     # Exposures (E1=101, E2=102)
-    1, 101, as.Date("2005-03-15"), # E1 for P1 (within obs, before O1) -> Keep
-    3, 102, as.Date("2009-11-01"), # E2 for P3 (within obs, before O1) -> Keep
-    5, 101, as.Date("2004-01-01"), # E1 for P5 (within obs, before O1) -> Keep
-    1, 102, as.Date("2016-01-01"), # E2 for P1 (after obs_end) -> Remove
+    1, 101, as.Date("2005-03-15"), # E1 for P1: Passes washout(>=2002-01-01), obs, E<O -> Keep
+    3, 102, as.Date("2009-11-01"), # E2 for P3: Fails washout(<2010-01-01) -> Remove
+    5, 101, as.Date("2007-05-20"), # E1 for P5: Passes washout(>=2004-06-01), obs, E<O -> Keep
+    1, 102, as.Date("2016-01-01"), # E2 for P1: Passes washout, but Fails obs end(>2015-12-31) -> Remove
     # Outcomes (O1=201)
     1, 201, as.Date("2010-08-20"), # O1 for P1
     3, 201, as.Date("2015-02-25"), # O1 for P3
@@ -129,23 +129,24 @@ test_that("defineExposedCohortForPair works correctly", {
   )
   exposureId_1 <- 101
   exposureId_2 <- 102
+  washoutYears <- 2
   
   # --- Test Case 1: Define exposed for Exposure 101 ---
   result1 <- defineExposedCohortForPair(cohortBaseForOutcome, allConditionFirstDates,
                                         outcomeDatesCurrentOutcome, exposureId_1,
-                                        currentOutcomeId)
+                                        currentOutcomeId, washoutYears)
   
   expect_type(result1, "list")
   expect_named(result1, c("exposed", "exposureDates"))
   expect_s3_class(result1$exposed, "tbl_df")
   expect_s3_class(result1$exposureDates, "tbl_df")
   
-  # Check exposed cohort (P1 and P5 exposed to 101 within obs and before outcome)
+  # Check exposed cohort (P1 and P5 pass all checks)
   expect_equal(nrow(result1$exposed), 2)
   expect_equal(sort(result1$exposed$exposed_person_id), c(1, 5))
   expect_named(result1$exposed, c("exposed_person_id", "index_date", "year_of_birth", "gender_concept_id"))
   expect_equal(result1$exposed$index_date[result1$exposed$exposed_person_id == 1], as.Date("2005-03-15"))
-  expect_equal(result1$exposed$index_date[result1$exposed$exposed_person_id == 5], as.Date("2004-01-01"))
+  expect_equal(result1$exposed$index_date[result1$exposed$exposed_person_id == 5], as.Date("2007-05-20"))
   
   # Check exposure dates extracted (P1, P5 had exposure 101)
   expect_equal(nrow(result1$exposureDates), 2)
@@ -155,15 +156,14 @@ test_that("defineExposedCohortForPair works correctly", {
   # --- Test Case 2: Define exposed for Exposure 102 ---
   result2 <- defineExposedCohortForPair(cohortBaseForOutcome, allConditionFirstDates,
                                         outcomeDatesCurrentOutcome, exposureId_2,
-                                        currentOutcomeId)
+                                        currentOutcomeId, washoutYears)
   
-  # Check exposed cohort (Only P3 exposed to 102 within obs and before outcome)
-  expect_equal(nrow(result2$exposed), 1)
-  expect_equal(result2$exposed$exposed_person_id, 3)
-  expect_equal(result2$exposed$index_date, as.Date("2009-11-01"))
+  # Check exposed cohort (P3 fails washout, P1 fails obs period) -> Should be NULL
+  expect_null(result2$exposed)
   
-  # Check exposure dates extracted (P1, P3 had exposure 102, but P1's was out of obs)
-  expect_equal(nrow(result2$exposureDates), 2) # Both P1 and P3 have dates in allConditionFirstDates
+  # Exposure dates should still be returned (P1, P3)
+  expect_s3_class(result2$exposureDates, "tbl_df")
+  expect_equal(nrow(result2$exposureDates), 2)
   expect_equal(sort(result2$exposureDates$person_id), c(1, 3))
   
   # --- Test Case 3: Exposure occurs after outcome ---
@@ -171,36 +171,49 @@ test_that("defineExposedCohortForPair works correctly", {
     dplyr::mutate(condition_start_date = dplyr::if_else(person_id == 1 & concept_id == 101,
                                                         as.Date("2011-01-01"), # Move P1's E1 after P1's O1
                                                         condition_start_date))
+  
   result_exp_after <- defineExposedCohortForPair(cohortBaseForOutcome, allConditionFirstDates_exp_after_out,
                                                  outcomeDatesCurrentOutcome, exposureId_1,
-                                                 currentOutcomeId)
-  # Now only P5 should be eligible for E1
+                                                 currentOutcomeId, washoutYears)
+  
+  # P1: Passes washout, obs period. Fails E<O. -> Remove P1.
+  # P5: Passes. -> Keep P5.
+  expect_s3_class(result_exp_after$exposed, "tbl_df")
   expect_equal(nrow(result_exp_after$exposed), 1)
   expect_equal(result_exp_after$exposed$exposed_person_id, 5)
+  
+  # Expect exposure dates for P1 and P5 to still be returned
+  expect_s3_class(result_exp_after$exposureDates, "tbl_df")
+  expect_equal(nrow(result_exp_after$exposureDates), 2)
+  expect_equal(sort(result_exp_after$exposureDates$person_id), c(1, 5))
   
   # --- Test Case 4: Exposure occurs outside observation period ---
   allConditionFirstDates_exp_outside_obs <- allConditionFirstDates %>%
     dplyr::mutate(condition_start_date = dplyr::if_else(person_id == 5 & concept_id == 101,
                                                         as.Date("2001-01-01"), # Move P5's E1 before P5's obs_start
                                                         condition_start_date))
+  
   result_exp_outside <- defineExposedCohortForPair(cohortBaseForOutcome, allConditionFirstDates_exp_outside_obs,
                                                    outcomeDatesCurrentOutcome, exposureId_1,
-                                                   currentOutcomeId)
+                                                   currentOutcomeId, washoutYears)
   # Now only P1 should be eligible for E1
   expect_equal(nrow(result_exp_outside$exposed), 1)
   expect_equal(result_exp_outside$exposed$exposed_person_id, 1)
+  # exposureDates still includes P1 and P5
+  expect_equal(nrow(result_exp_outside$exposureDates), 2)
+  expect_equal(sort(result_exp_outside$exposureDates$person_id), c(1, 5))
   
   # --- Test Case 5: No valid exposed individuals ---
   result_none <- defineExposedCohortForPair(cohortBaseForOutcome, allConditionFirstDates,
                                             outcomeDatesCurrentOutcome, 999, # Non-existent exposure ID
-                                            currentOutcomeId)
+                                            currentOutcomeId, washoutYears)
   expect_null(result_none$exposed)
   expect_equal(nrow(result_none$exposureDates), 0) # No dates found for this exposure
   
   # --- Test Case 6: Empty base cohort ---
   result_empty_base <- defineExposedCohortForPair(tibble::tibble(), allConditionFirstDates,
                                                   outcomeDatesCurrentOutcome, exposureId_1,
-                                                  currentOutcomeId)
+                                                  currentOutcomeId, washoutYears)
   expect_null(result_empty_base$exposed) # Should be NULL
   expect_null(result_empty_base$exposureDates) # No dates as no one in base
 })
