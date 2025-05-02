@@ -79,19 +79,92 @@
 <div class="section level3">
 <h3 id="prerequisites">Prerequisites<a class="anchor" aria-label="anchor" href="#prerequisites"></a>
 </h3>
+<ul>
+<li>
+<strong>R Environment:</strong> R version 4.4.1 or higher recommended. A properly configured R environment is necessary, especially for database connectivity. See the <a href="https://ohdsi.github.io/Hades/rSetup.html" class="external-link">OHDSI Hades R Setup Guide</a> for detailed instructions on setting up R, RTools (Windows), and potentially Java for database drivers.</li>
+<li>
+<strong>Database Access:</strong> Access to an OMOP CDM v5.3+ database.</li>
+<li>
+<strong>DuckDB (Optional):</strong> If you intend to connect to local <code>.duckdb</code> files, you must install the <code>duckdb</code> package separately: <code>install.packages("duckdb")</code>.</li>
+</ul>
 </div>
 <div class="section level3">
 <h3 id="steps">Steps<a class="anchor" aria-label="anchor" href="#steps"></a>
 </h3>
+<ol style="list-style-type: decimal">
+<li><p><strong>Install from GitHub:</strong> <code>R     # install.packages("remotes") # If not already installed     remotes::install_github("sandersoodla/Exposure2OutcomeSurv")</code></p></li>
+<li><p><strong>Configure Database Connection:</strong> Before first use, you <strong>must</strong> set up your database connection details in an <code>.Renviron</code> file. See the <strong>Configuration</strong> section below for details.</p></li>
+</ol>
 </div>
-</div>
-<div class="section level2">
-<h2 id="usage">Usage<a class="anchor" aria-label="anchor" href="#usage"></a>
-</h2>
 </div>
 <div class="section level2">
 <h2 id="configuration">Configuration<a class="anchor" aria-label="anchor" href="#configuration"></a>
 </h2>
+<ol style="list-style-type: decimal">
+<li>
+<p><strong>Edit <code>.Renviron</code>:</strong> Create or edit the <code>.Renviron</code> file (in your project root or home directory) using the following template. Fill in the values specific to your setup.</p>
+<div class="sourceCode" id="cb1"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1" tabindex="-1"></a><span class="co"># Java options (increase memory if needed for some drivers)</span></span>
+<span id="cb1-2"><a href="#cb1-2" tabindex="-1"></a><span class="va">_JAVA_OPTIONS</span><span class="op">=</span><span class="st">'-Xmx4g'</span></span>
+<span id="cb1-3"><a href="#cb1-3" tabindex="-1"></a></span>
+<span id="cb1-4"><a href="#cb1-4" tabindex="-1"></a><span class="co"># Path to folder containing database driver JAR files</span></span>
+<span id="cb1-5"><a href="#cb1-5" tabindex="-1"></a><span class="va">DATABASECONNECTOR_JAR_FOLDER</span><span class="op">=</span><span class="st">'C:/path/to/jdbc_drivers'</span></span>
+<span id="cb1-6"><a href="#cb1-6" tabindex="-1"></a></span>
+<span id="cb1-7"><a href="#cb1-7" tabindex="-1"></a><span class="co"># --- Database Type ---</span></span>
+<span id="cb1-8"><a href="#cb1-8" tabindex="-1"></a><span class="co"># Set to "duckdb" for local files, or the DatabaseConnector name for others</span></span>
+<span id="cb1-9"><a href="#cb1-9" tabindex="-1"></a><span class="co"># Examples: "postgresql", "sql server", "oracle", "redshift", "bigquery"</span></span>
+<span id="cb1-10"><a href="#cb1-10" tabindex="-1"></a></span>
+<span id="cb1-11"><a href="#cb1-11" tabindex="-1"></a><span class="va">DBMS</span><span class="op">=</span><span class="st">"postgresql"</span></span>
+<span id="cb1-12"><a href="#cb1-12" tabindex="-1"></a></span>
+<span id="cb1-13"><a href="#cb1-13" tabindex="-1"></a><span class="co"># --- Connection Details ---</span></span>
+<span id="cb1-14"><a href="#cb1-14" tabindex="-1"></a><span class="co"># Option A: If DBMS = "duckdb"</span></span>
+<span id="cb1-15"><a href="#cb1-15" tabindex="-1"></a><span class="co"># DB_HOST should be the FOLDER containing the .duckdb file</span></span>
+<span id="cb1-16"><a href="#cb1-16" tabindex="-1"></a><span class="co"># DB_NAME should be the FILENAME of the .duckdb file (e.g., "cdm.duckdb")</span></span>
+<span id="cb1-17"><a href="#cb1-17" tabindex="-1"></a></span>
+<span id="cb1-18"><a href="#cb1-18" tabindex="-1"></a><span class="co"># Option B: If DBMS is NOT "duckdb" (using DatabaseConnector)</span></span>
+<span id="cb1-19"><a href="#cb1-19" tabindex="-1"></a><span class="co"># DB_HOST: Server address (e.g., "your_server.com", "your_server\\instance")</span></span>
+<span id="cb1-20"><a href="#cb1-20" tabindex="-1"></a><span class="co"># DB_NAME: Database name on the server (e.g., "cdm_prod", "omop_db")</span></span>
+<span id="cb1-21"><a href="#cb1-21" tabindex="-1"></a></span>
+<span id="cb1-22"><a href="#cb1-22" tabindex="-1"></a><span class="va">DB_HOST</span><span class="op">=</span>your-db-host</span>
+<span id="cb1-23"><a href="#cb1-23" tabindex="-1"></a><span class="va">DB_NAME</span><span class="op">=</span>your-db-name</span>
+<span id="cb1-24"><a href="#cb1-24" tabindex="-1"></a><span class="va">DB_PORT</span><span class="op">=</span>db-port</span>
+<span id="cb1-25"><a href="#cb1-25" tabindex="-1"></a><span class="va">DB_USERNAME</span><span class="op">=</span>your-username</span>
+<span id="cb1-26"><a href="#cb1-26" tabindex="-1"></a><span class="va">DB_PASSWORD</span><span class="op">=</span>your-password</span>
+<span id="cb1-27"><a href="#cb1-27" tabindex="-1"></a></span>
+<span id="cb1-28"><a href="#cb1-28" tabindex="-1"></a><span class="co"># Schema containing the OMOP CDM tables</span></span>
+<span id="cb1-29"><a href="#cb1-29" tabindex="-1"></a><span class="va">CDM_SCHEMA</span><span class="op">=</span>schema-where-CDM-is-located</span>
+<span id="cb1-30"><a href="#cb1-30" tabindex="-1"></a><span class="co"># Schema where the application can write temporary tables (requires WRITE access)</span></span>
+<span id="cb1-31"><a href="#cb1-31" tabindex="-1"></a><span class="va">WRITE_SCHEMA</span><span class="op">=</span>schema-for-temporary-writing-by-CDMConnector</span>
+<span id="cb1-32"><a href="#cb1-32" tabindex="-1"></a></span>
+<span id="cb1-33"><a href="#cb1-33" tabindex="-1"></a><span class="co"># --- Results Directory ---</span></span>
+<span id="cb1-34"><a href="#cb1-34" tabindex="-1"></a><span class="va">SURV_RESULTS_DIR</span><span class="op">=</span><span class="st">""</span></span></code></pre></div>
+</li>
+<li><p><strong>Restart R Session:</strong> After creating or modifying your <code>.Renviron</code> file, <strong>you must restart your R session</strong> for the environment variables to be loaded correctly. (In RStudio: Session -&gt; Restart R).</p></li>
+</ol>
+</div>
+<div class="section level2">
+<h2 id="usage">Usage<a class="anchor" aria-label="anchor" href="#usage"></a>
+</h2>
+<ol style="list-style-type: decimal">
+<li><p><strong>Load Package:</strong> <code>R     library(Exposure2OutcomeSurv)</code></p></li>
+<li>
+<p><strong>Launch App:</strong></p>
+<div class="sourceCode" id="cb2"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="fu"><a href="reference/launchApp.html">launchApp</a></span><span class="op">(</span><span class="op">)</span></span>
+<span></span>
+<span><span class="co"># Example with optional arguments (see function documentation for details):</span></span>
+<span><span class="co"># launchApp(port = 1234, launch.browser = FALSE)</span></span></code></pre></div>
+</li>
+<li>
+<p><strong>Workflow:</strong></p>
+<ul>
+<li>Connect to your database (using configured credentials).</li>
+<li>Select exposure and outcome concepts.</li>
+<li>Run the analysis, providing a filename for saving results.</li>
+<li>Explore the summary table and Kaplan-Meier plots.</li>
+<li>Optionally, load previously saved results.</li>
+</ul>
+</li>
+</ol>
 </div>
 <div class="section level2">
 <h2 id="author-information">Author Information<a class="anchor" aria-label="anchor" href="#author-information"></a>
