@@ -15,8 +15,14 @@ app_server <- function(input, output, session) {
   
   
   if (tolower(DBMS) == "duckdb") {
-    connection <- DBI::dbConnect(duckdb::duckdb(), dbdir = DATABASE)
-    cdm <- CDMConnector::cdmFromCon(connection, cdmSchema = CDM_SCHEMA, writeSchema = WRITE_SCHEMA)
+    if (requireNamespace("duckdb", quietly = TRUE)) {
+      # duckdb is installed, proceed with connection
+      connection <- DBI::dbConnect(duckdb::duckdb(), dbdir = DATABASE)
+      cdm <- CDMConnector::cdmFromCon(connection, cdmSchema = CDM_SCHEMA, writeSchema = WRITE_SCHEMA)
+    } else {
+      stop("The 'duckdb' package is required to connect to local DuckDB files. ",
+           "Please install it using install.packages('duckdb') and try again.")
+    }
     
   } else {
     connectionDetails <- DatabaseConnector::createConnectionDetails(
