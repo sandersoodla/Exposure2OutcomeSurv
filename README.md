@@ -32,19 +32,25 @@ The application allows users to:
 
 ### Prerequisites
 
-* **R Environment:** R version 4.4.1 or higher recommended. A properly configured R environment is necessary, especially for database connectivity. See the [OHDSI Hades R Setup Guide](https://ohdsi.github.io/Hades/rSetup.html) for detailed instructions on setting up R, RTools (Windows), and potentially Java for database drivers.
+* **R Environment:** R version 4.4.0 or higher recommended. A properly configured R environment is necessary, especially for database connectivity. See the [OHDSI Hades R Setup Guide](https://ohdsi.github.io/Hades/rSetup.html) for detailed instructions on setting up R, RTools (Windows), and potentially Java for database drivers.
 * **Database Access:** Access to an OMOP CDM v5.3+ database.
 * **DuckDB (Optional):** If you intend to connect to local `.duckdb` files, you must install the `duckdb` package separately: `install.packages("duckdb")`.
 
 ### Steps
 
-1.  **Install from GitHub:**
-    ```R
-    # install.packages("remotes") # If not already installed
-    remotes::install_github("sandersoodla/Exposure2OutcomeSurv")
-    ```
+1.  **Install Package:**
+    * **A) From GitHub:**
+        ```R
+        # install.packages("remotes") # If not already installed
+        remotes::install_github("sandersoodla/Exposure2OutcomeSurv")
+        ```
+    * **B) From Cloned Repo:**
+        ```R
+        # install.packages("remotes") # If not already installed
+        remotes::install_local("path/to/your/cloned/Exposure2OutcomeSurv")
+        ```
 
-2.  **Configure Database Connection:** Before first use, you **must** set up your database connection details in an `.Renviron` file. See the **Configuration** section below for details.
+3.  **Configure Database Connection:** Before first use, you **must** set up your database connection details in an `.Renviron` file. See the **Configuration** section below for details.
 
 ## Configuration
 
