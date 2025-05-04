@@ -81,7 +81,7 @@
 </h3>
 <ul>
 <li>
-<strong>R Environment:</strong> R version 4.4.1 or higher recommended. A properly configured R environment is necessary, especially for database connectivity. See the <a href="https://ohdsi.github.io/Hades/rSetup.html" class="external-link">OHDSI Hades R Setup Guide</a> for detailed instructions on setting up R, RTools (Windows), and potentially Java for database drivers.</li>
+<strong>R Environment:</strong> R version 4.4.0 or higher recommended. A properly configured R environment is necessary, especially for database connectivity. See the <a href="https://ohdsi.github.io/Hades/rSetup.html" class="external-link">OHDSI Hades R Setup Guide</a> for detailed instructions on setting up R, RTools (Windows), and potentially Java for database drivers.</li>
 <li>
 <strong>Database Access:</strong> Access to an OMOP CDM v5.3+ database.</li>
 <li>
@@ -92,8 +92,19 @@
 <h3 id="steps">Steps<a class="anchor" aria-label="anchor" href="#steps"></a>
 </h3>
 <ol style="list-style-type: decimal">
-<li><p><strong>Install from GitHub:</strong> <code>R     # install.packages("remotes") # If not already installed     remotes::install_github("sandersoodla/Exposure2OutcomeSurv")</code></p></li>
-<li><p><strong>Configure Database Connection:</strong> Before first use, you <strong>must</strong> set up your database connection details in an <code>.Renviron</code> file. See the <strong>Configuration</strong> section below for details.</p></li>
+<li>
+<strong>Install Package:</strong>
+<ul>
+<li>
+<strong>A) From GitHub:</strong> <code>R     # install.packages("remotes") # If not already installed     remotes::install_github("sandersoodla/Exposure2OutcomeSurv")</code>
+</li>
+<li>
+<strong>B) From Cloned Repo:</strong> <code>R     # install.packages("remotes") # If not already installed     remotes::install_local("path/to/your/cloned/Exposure2OutcomeSurv")</code>
+</li>
+</ul>
+</li>
+<li>
+<strong>Configure Database Connection:</strong> Before first use, you <strong>must</strong> set up your database connection details in an <code>.Renviron</code> file. See the <strong>Configuration</strong> section below for details.</li>
 </ol>
 </div>
 </div>
