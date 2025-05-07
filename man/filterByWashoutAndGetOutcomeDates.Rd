@@ -2,7 +2,7 @@
 % Please edit documentation in R/survivalHelpers.R
 \name{filterByWashoutAndGetOutcomeDates}
 \alias{filterByWashoutAndGetOutcomeDates}
-\title{Filter Cohort by Washout and Get Corresponding Outcome Dates}
+\title{Filter Cohort by Outcome Washout and Get Corresponding Outcome Dates}
 \usage{
 filterByWashoutAndGetOutcomeDates(
   cohortBase,

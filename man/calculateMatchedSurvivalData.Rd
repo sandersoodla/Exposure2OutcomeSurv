@@ -28,7 +28,12 @@ Used for labeling results.}
 
 \item{matchRatio}{The target number of controls to match to each exposed person.}
 
-\item{washoutYears}{The washout period in years applied relative to each outcome.}
+\item{washoutYears}{The washout period in years. This is used to:
+\enumerate{
+\item Define a required period of observation before an outcome event for initial cohort eligibility (\code{filterByWashoutAndGetOutcomeDates}).
+\item Define a required period of observation before an exposure event for an individual to be included in the exposed cohort (\code{defineExposedCohortForPair}).
+\item Define a required period of observation for a control \emph{prior to the matched exposed's index date} (\code{performPairMatching}).
+}}
 
 \item{session}{Optional. The Shiny session object. If provided, notifications
 will be shown in the Shiny UI. Otherwise, messages are printed to the console.}
@@ -43,7 +48,7 @@ a list containing:
 \item{outcomeId}{Numeric ID of the outcome.}
 \item{exposureLabel}{Character label for the exposure (from \code{conceptLabelLookup}).}
 \item{outcomeLabel}{Character label for the outcome (from \code{conceptLabelLookup}).}
-\item{nExposedIncludedInMatching}{Count of exposed individuals after checking for prior outcomes.}
+\item{nExposedIdentifiedInitial}{Count of exposed individuals after initial definition (meeting exposure washout and outcome post-exposure criteria).}
 \item{nExposedMatched}{Count of exposed individuals successfully matched to >=1 control.}
 \item{nUnexposedMatched}{Total count of matched unexposed controls.}
 \item{nTotalPersonsInAnalysis}{Total number of rows (persons) in the final \code{survivalData} for the pair.}
