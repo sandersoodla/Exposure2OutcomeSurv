@@ -118,7 +118,7 @@ mock_defineExposedCohortForPair <- function(cohortBaseForOutcome, allConditionFi
   return(list(exposed = mock_exposed_def, exposureDates = exposure_dates_in_base))
 }
 
-mock_performPairMatching <- function(exposedCohortDefinition, controlsPoolBaseOutcome, exposureDatesCurrentExposure, matchRatio, exposureId, outcomeId, session = NULL) {
+mock_performPairMatching <- function(exposedCohortDefinition, controlsPool, matchRatio, exposureId, outcomeId, washoutYears, session = NULL) {
   # Default: Assume we can match P1 to P3, P4; and P6 to P5 for E1/O1
   # Assume we can match P3 to P1, P4; and P7 to P9, P10 for E2/O1 (if P1, P4 in controlsPool)
   # Assume we can match P3 to P1; and P7 to P9 for E2/O2 (if P1, P9 in controlsPool)
@@ -136,7 +136,7 @@ mock_performPairMatching <- function(exposedCohortDefinition, controlsPoolBaseOu
   for(i in 1:n_exposed) {
     exposed_person <- exposedCohortDefinition[i,]
     # Find some arbitrary controls from the pool (ensure they are not the exposed person)
-    potential_controls <- controlsPoolBaseOutcome %>% dplyr::filter(person_id != exposed_person$exposed_person_id)
+    potential_controls <- controlsPool %>% dplyr::filter(person_id != exposed_person$exposed_person_id)
     # Simple mock: grab first few available based on matchRatio, ignore dates/age/gender for mock simplicity
     n_controls_to_get <- min(matchRatio, nrow(potential_controls))
     if (n_controls_to_get > 0) {
@@ -241,7 +241,7 @@ test_that("calculateMatchedSurvivalData happy path (1 Exposure, 1 Outcome)", {
   pair_result <- results$pair_101_201
   expect_type(pair_result, "list")
   expect_named(pair_result, c("survivalData", "exposureId", "outcomeId", "exposureLabel", "outcomeLabel",
-                              "nExposedIncludedInMatching", "nExposedMatched", "nUnexposedMatched", "nTotalPersonsInAnalysis"))
+                              "nExposedIdentifiedInitial", "nExposedMatched", "nUnexposedMatched", "nTotalPersonsInAnalysis"))
   
   expect_s3_class(pair_result$survivalData, "tbl_df")
   # Check counts based on mock logic (E1/O1: Exposed P1, P6 initially)
@@ -250,7 +250,7 @@ test_that("calculateMatchedSurvivalData happy path (1 Exposure, 1 Outcome)", {
   expect_equal(pair_result$outcomeId, 201)
   expect_equal(pair_result$exposureLabel, "Exposure A")
   expect_equal(pair_result$outcomeLabel, "Outcome X")
-  expect_equal(pair_result$nExposedIncludedInMatching, 2) # Mock defines P1, P6 as exposed for E1 after washout for O1
+  expect_equal(pair_result$nExposedIdentifiedInitial, 2) # Mock defines P1, P6 as exposed for E1 after washout for O1
   expect_equal(pair_result$nExposedMatched, 2) # Mock matches both P1 and P6
   expect_gt(pair_result$nUnexposedMatched, 0) # Mock adds controls
   expect_equal(pair_result$nTotalPersonsInAnalysis, nrow(pair_result$survivalData))
@@ -294,7 +294,7 @@ test_that("calculateMatchedSurvivalData handles multiple pairs", {
   expect_equal(pair_result_102_202$exposureLabel, "Exposure B")
   expect_equal(pair_result_102_202$outcomeLabel, "Outcome Y")
   # Based on mock: E2=102, O2=202. Base cohort after O2 washout excludes P8. Exposed E2 are P3, P7. Both are in base.
-  expect_equal(pair_result_102_202$nExposedIncludedInMatching, 2)
+  expect_equal(pair_result_102_202$nExposedIdentifiedInitial, 2)
   expect_equal(pair_result_102_202$nExposedMatched, 2) # Mock matches all defined exposed
   expect_gt(pair_result_102_202$nUnexposedMatched, 0)
 })
