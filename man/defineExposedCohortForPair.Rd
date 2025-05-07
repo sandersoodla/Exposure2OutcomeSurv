@@ -10,6 +10,7 @@ defineExposedCohortForPair(
   outcomeDatesCurrentOutcome,
   exposureId,
   outcomeId,
+  washoutYears,
   session = NULL
 )
 }
@@ -27,6 +28,9 @@ for the specific outcome being analyzed in the current loop iteration.}
 
 \item{outcomeId}{The numeric concept ID of the outcome condition.}
 
+\item{washoutYears}{The washout period in years. Exposure must occur on or after
+\code{obs_start_date + washoutYears}.}
+
 \item{session}{Optional. The Shiny session object.}
 }
 \value{
@@ -39,9 +43,10 @@ Returns \code{NULL} for \code{exposed} if no valid exposed individuals are found
 \code{NULL}for both \code{exposed} and \code{exposureDates} if \code{cohortBaseForOutcome} is null or empty
 }
 \description{
-Identifies individuals exposed to a specific condition within a
-pre-filtered (washout-applied) cohort. Ensures exposure occurs within
-the observation period and that the outcome (if present for the person)
-occurs strictly \emph{after} the exposure date.
+Identifies individuals exposed to a specific condition (\code{exposureId}) from a
+base cohort (already filtered by outcome washout), ensuring their exposure
+occurs AFTER the specified washout period relative to observation start,
+and BEFORE any occurrence of the specified outcome condition (\code{outcomeId}).
+Returns the filtered exposed cohort table and their exposure dates.
 }
 \keyword{internal}

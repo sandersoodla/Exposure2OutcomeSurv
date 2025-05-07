@@ -110,10 +110,10 @@ test_that("defineExposedCohortForPair works correctly", {
   allConditionFirstDates <- tibble::tribble(
     ~person_id, ~concept_id, ~condition_start_date,
     # Exposures (E1=101, E2=102)
-    1, 101, as.Date("2005-03-15"), # E1 for P1 (within obs, before O1) -> Keep
-    3, 102, as.Date("2009-11-01"), # E2 for P3 (within obs, before O1) -> Keep
-    5, 101, as.Date("2004-01-01"), # E1 for P5 (within obs, before O1) -> Keep
-    1, 102, as.Date("2016-01-01"), # E2 for P1 (after obs_end) -> Remove
+    1, 101, as.Date("2005-03-15"), # E1 for P1: Passes washout(>=2002-01-01), obs, E<O -> Keep
+    3, 102, as.Date("2009-11-01"), # E2 for P3: Fails washout(<2010-01-01) -> Remove
+    5, 101, as.Date("2007-05-20"), # E1 for P5: Passes washout(>=2004-06-01), obs, E<O -> Keep
+    1, 102, as.Date("2016-01-01"), # E2 for P1: Passes washout, but Fails obs end(>2015-12-31) -> Remove
     # Outcomes (O1=201)
     1, 201, as.Date("2010-08-20"), # O1 for P1
     3, 201, as.Date("2015-02-25"), # O1 for P3
@@ -129,23 +129,24 @@ test_that("defineExposedCohortForPair works correctly", {
   )
   exposureId_1 <- 101
   exposureId_2 <- 102
+  washoutYears <- 2
   
   # --- Test Case 1: Define exposed for Exposure 101 ---
   result1 <- defineExposedCohortForPair(cohortBaseForOutcome, allConditionFirstDates,
                                         outcomeDatesCurrentOutcome, exposureId_1,
-                                        currentOutcomeId)
+                                        currentOutcomeId, washoutYears)
   
   expect_type(result1, "list")
   expect_named(result1, c("exposed", "exposureDates"))
   expect_s3_class(result1$exposed, "tbl_df")
   expect_s3_class(result1$exposureDates, "tbl_df")
   
-  # Check exposed cohort (P1 and P5 exposed to 101 within obs and before outcome)
+  # Check exposed cohort (P1 and P5 pass all checks)
   expect_equal(nrow(result1$exposed), 2)
   expect_equal(sort(result1$exposed$exposed_person_id), c(1, 5))
   expect_named(result1$exposed, c("exposed_person_id", "index_date", "year_of_birth", "gender_concept_id"))
   expect_equal(result1$exposed$index_date[result1$exposed$exposed_person_id == 1], as.Date("2005-03-15"))
-  expect_equal(result1$exposed$index_date[result1$exposed$exposed_person_id == 5], as.Date("2004-01-01"))
+  expect_equal(result1$exposed$index_date[result1$exposed$exposed_person_id == 5], as.Date("2007-05-20"))
   
   # Check exposure dates extracted (P1, P5 had exposure 101)
   expect_equal(nrow(result1$exposureDates), 2)
@@ -155,15 +156,14 @@ test_that("defineExposedCohortForPair works correctly", {
   # --- Test Case 2: Define exposed for Exposure 102 ---
   result2 <- defineExposedCohortForPair(cohortBaseForOutcome, allConditionFirstDates,
                                         outcomeDatesCurrentOutcome, exposureId_2,
-                                        currentOutcomeId)
+                                        currentOutcomeId, washoutYears)
   
-  # Check exposed cohort (Only P3 exposed to 102 within obs and before outcome)
-  expect_equal(nrow(result2$exposed), 1)
-  expect_equal(result2$exposed$exposed_person_id, 3)
-  expect_equal(result2$exposed$index_date, as.Date("2009-11-01"))
+  # Check exposed cohort (P3 fails washout, P1 fails obs period) -> Should be NULL
+  expect_null(result2$exposed)
   
-  # Check exposure dates extracted (P1, P3 had exposure 102, but P1's was out of obs)
-  expect_equal(nrow(result2$exposureDates), 2) # Both P1 and P3 have dates in allConditionFirstDates
+  # Exposure dates should still be returned (P1, P3)
+  expect_s3_class(result2$exposureDates, "tbl_df")
+  expect_equal(nrow(result2$exposureDates), 2)
   expect_equal(sort(result2$exposureDates$person_id), c(1, 3))
   
   # --- Test Case 3: Exposure occurs after outcome ---
@@ -171,71 +171,91 @@ test_that("defineExposedCohortForPair works correctly", {
     dplyr::mutate(condition_start_date = dplyr::if_else(person_id == 1 & concept_id == 101,
                                                         as.Date("2011-01-01"), # Move P1's E1 after P1's O1
                                                         condition_start_date))
+  
   result_exp_after <- defineExposedCohortForPair(cohortBaseForOutcome, allConditionFirstDates_exp_after_out,
                                                  outcomeDatesCurrentOutcome, exposureId_1,
-                                                 currentOutcomeId)
-  # Now only P5 should be eligible for E1
+                                                 currentOutcomeId, washoutYears)
+  
+  # P1: Passes washout, obs period. Fails E<O. -> Remove P1.
+  # P5: Passes. -> Keep P5.
+  expect_s3_class(result_exp_after$exposed, "tbl_df")
   expect_equal(nrow(result_exp_after$exposed), 1)
   expect_equal(result_exp_after$exposed$exposed_person_id, 5)
+  
+  # Expect exposure dates for P1 and P5 to still be returned
+  expect_s3_class(result_exp_after$exposureDates, "tbl_df")
+  expect_equal(nrow(result_exp_after$exposureDates), 2)
+  expect_equal(sort(result_exp_after$exposureDates$person_id), c(1, 5))
   
   # --- Test Case 4: Exposure occurs outside observation period ---
   allConditionFirstDates_exp_outside_obs <- allConditionFirstDates %>%
     dplyr::mutate(condition_start_date = dplyr::if_else(person_id == 5 & concept_id == 101,
                                                         as.Date("2001-01-01"), # Move P5's E1 before P5's obs_start
                                                         condition_start_date))
+  
   result_exp_outside <- defineExposedCohortForPair(cohortBaseForOutcome, allConditionFirstDates_exp_outside_obs,
                                                    outcomeDatesCurrentOutcome, exposureId_1,
-                                                   currentOutcomeId)
+                                                   currentOutcomeId, washoutYears)
   # Now only P1 should be eligible for E1
   expect_equal(nrow(result_exp_outside$exposed), 1)
   expect_equal(result_exp_outside$exposed$exposed_person_id, 1)
+  # exposureDates still includes P1 and P5
+  expect_equal(nrow(result_exp_outside$exposureDates), 2)
+  expect_equal(sort(result_exp_outside$exposureDates$person_id), c(1, 5))
   
   # --- Test Case 5: No valid exposed individuals ---
   result_none <- defineExposedCohortForPair(cohortBaseForOutcome, allConditionFirstDates,
                                             outcomeDatesCurrentOutcome, 999, # Non-existent exposure ID
-                                            currentOutcomeId)
+                                            currentOutcomeId, washoutYears)
   expect_null(result_none$exposed)
   expect_equal(nrow(result_none$exposureDates), 0) # No dates found for this exposure
   
   # --- Test Case 6: Empty base cohort ---
   result_empty_base <- defineExposedCohortForPair(tibble::tibble(), allConditionFirstDates,
                                                   outcomeDatesCurrentOutcome, exposureId_1,
-                                                  currentOutcomeId)
+                                                  currentOutcomeId, washoutYears)
   expect_null(result_empty_base$exposed) # Should be NULL
   expect_null(result_empty_base$exposureDates) # No dates as no one in base
 })
 
 
 test_that("performPairMatching works correctly", {
-  # --- Setup mock data ---
+  # --- Setup mock data  ---
   exposedCohortDefinition <- tibble::tibble( # P1 and P3 exposed
     exposed_person_id = c(1, 3),
     index_date = as.Date(c("2005-03-15", "2009-11-01")),
     year_of_birth = c(1980, 1990),
     gender_concept_id = c(8507, 8507) # Both Male
   )
-  # Potential controls pool (passed outcome washout)
-  controlsPoolBaseOutcome <- tibble::tibble(
+  
+  # Create the single controlsPool input
+  controls_pool_base_info <- tibble::tibble(
     person_id = c(2, 4, 5, 6, 7, 8),
     year_of_birth =     c(1985, 1995, 1980, 1985, 1992, 1998),
     gender_concept_id = c(8532, 8532, 8507, 8532, 8507, 8507), # F, F, M, F, M, M
-    obs_start_date = as.Date(c("2005-01-01", "2010-01-01", "2002-06-01", "2006-06-01", "2009-06-01", "2011-06-01")),
+    obs_start_date = as.Date(c("2000-01-01", "2007-01-01", "2002-06-01", "2000-01-01", "2007-06-01", "2008-06-01")),
     obs_end_date = as.Date(c("2018-12-31", "2020-12-31", "2016-05-31", "2017-05-31", "2021-05-31", "2022-05-31")),
     outcome_date = as.Date(c("2006-05-01", NA, "2014-09-10", "2010-10-10", "2012-04-01", NA)) # Outcome 201 dates
   )
-  # Exposure dates for the specific exposure (101) being matched
-  exposureDatesCurrentExposure <- tibble::tibble(
-    person_id = c(1, 4, 8), # P1 (exposed), P4 (exposed after index), P8 (exposed after index)
-    exposure_date = as.Date(c("2005-03-15", "2012-07-01", "2013-05-05"))
+  exposure_dates_info <- tibble::tibble(
+    person_id = c(4, 8), # P4 and P8 have exposure AFTER a potential index for P1/P3
+    # P1 is exposed (case), P3 is exposed (case)
+    # P2, P5, P6, P7 are never exposed to E101 in this scenario
+    exposure_date = as.Date(c("2012-07-01", "2013-05-05"))
   )
+  
+  controlsPool <- controls_pool_base_info %>%
+    dplyr::left_join(exposure_dates_info, by = "person_id")
+  
   matchRatio <- 2
   exposureId <- 101
-  outcomeId <- 201 # Assume outcome 201 was used for washout/control eligibility
+  outcomeId <- 201
+  washoutYears_test <- 2 # Define the washout
   
   # --- Test Case 1: Basic matching ---
-  result1 <- performPairMatching(exposedCohortDefinition, controlsPoolBaseOutcome,
-                                 exposureDatesCurrentExposure, matchRatio,
-                                 exposureId, outcomeId)
+  result1 <- performPairMatching(exposedCohortDefinition, controlsPool,
+                                 matchRatio,
+                                 exposureId, outcomeId, washoutYears_test)
   
   expect_type(result1, "list")
   expect_named(result1, c("matchedData", "nMatchedExposed"))
@@ -248,70 +268,97 @@ test_that("performPairMatching works correctly", {
   # Check matched data structure
   expect_named(result1$matchedData, c("person_id", "exposure_status", "index_date", "set_id"))
   
-  # --- Detailed checks for Exposed Person 1 (Index: 2005-03-15, YoB: 1980, Gender: M) ---
-  # Potential Controls: P2(F), P4(F), P5(M, YoB:1980), P6(F), P7(M, YoB:1992), P8(M, YoB:1998)
-  # Risk Set for P1 (Observed at 2005-03-15, No Exp 101 before, No Out 201 before):
-  # P2: Obs OK (2005-01-01 - 2018-12-31). No Exp 101. Out 201 @ 2006-05-01 (> index). -> Eligible
-  # P4: Obs NOT OK (starts 2010-01-01). -> Ineligible
-  # P5: Obs OK (2002-06-01 - 2016-05-31). No Exp 101. Out 201 @ 2014-09-10 (> index). -> Eligible
-  # P6: Obs NOT OK (starts 2006-06-01). -> Ineligible
-  # P7: Obs NOT OK (starts 2009-06-01). -> Ineligible
-  # P8: Obs NOT OK (starts 2011-06-01). -> Ineligible
-  # Risk Set for P1: {P2, P5}
-  # Matching for P1 (Gender M, YoB 1980, Ratio 2):
-  # Filter by Gender M: {P5}
-  # Calculate Age Diff: P5 (abs(1980-1980)=0)
-  # Sort & Slice (n=2): {P5} -> Only 1 control found
+  # --- Detailed checks for Exposed Person 1 (P1) ---
+  # Case P1: ID=1, Index=2005-03-15, YoB=1980, Gender=M, Washout=2yrs
+  # Risk Set Criteria for P1 (IndexDate_P1 = 2005-03-15):
+  #   1. ObservedAtIdx: obs_start <= IndexDate_P1 <= obs_end
+  #   2. PriorObsOk: (obs_start + 2yr) <= IndexDate_P1
+  #   3. UnexposedAtIdx: is.na(exp_date) OR exp_date > IndexDate_P1
+  #   4. OutcomeFreeAtIdx: is.na(out_date) OR out_date > IndexDate_P1
+  #
+  # Evaluating Potential Controls for P1:
+  # P2 (ID=2, obs_start=2000-01-01, out=2006-05-01, exp=NA):
+  #   C1:Yes. C2:Yes (2000-01-01+2yr <= 2005-03-15). C3:Yes. C4:Yes (2006-05-01 > 2005-03-15). -> IN (Female)
+  # P4 (ID=4, obs_start=2007-01-01, out=NA, exp=2012-07-01):
+  #   C1:No (obs_start > IndexDate_P1). -> OUT
+  # P5 (ID=5, obs_start=2002-06-01, out=2014-09-10, exp=NA):
+  #   C1:Yes. C2:Yes (2002-06-01+2yr <= 2005-03-15). C3:Yes. C4:Yes (2014-09-10 > 2005-03-15). -> IN (Male)
+  # P6 (ID=6, obs_start=2000-01-01, out=2010-10-10, exp=NA):
+  #   C1:Yes. C2:Yes (2000-01-01+2yr <= 2005-03-15). C3:Yes. C4:Yes (2010-10-10 > 2005-03-15). -> IN (Female)
+  # P7 (ID=7, obs_start=2007-06-01, out=2012-04-01, exp=NA):
+  #   C1:No (obs_start > IndexDate_P1). -> OUT
+  # P8 (ID=8, obs_start=2008-06-01, out=NA, exp=2013-05-05):
+  #   C1:No (obs_start > IndexDate_P1). -> OUT
+  #
+  # Final Risk Set for P1: {P2, P5, P6}
+  # Matching for P1 (Male, YoB 1980, Ratio 2):
+  #   Gender Filter (Male): {P5}
+  #   Age Diff (vs 1980): P5(0)
+  #   Matched: {P5} (1 control found)
   p1_set <- result1$matchedData %>% dplyr::filter(set_id == 1)
-  expect_equal(nrow(p1_set), 2) # Exposed + 1 Control
+  expect_equal(nrow(p1_set), 2) 
   expect_equal(p1_set$person_id[p1_set$exposure_status == 1], 1)
   expect_equal(p1_set$person_id[p1_set$exposure_status == 0], 5)
   expect_true(all(p1_set$index_date == as.Date("2005-03-15")))
   
-  # --- Detailed checks for Exposed Person 3 (Index: 2009-11-01, YoB: 1990, Gender: M) ---
-  # Potential Controls: P2(F), P4(F), P5(M, YoB:1980), P6(F), P7(M, YoB:1992), P8(M, YoB:1998)
-  # Risk Set for P3 (Observed at 2009-11-01, No Exp 101 before, No Out 201 before):
-  # P2: Obs OK. No Exp 101. Out 201 @ 2006-05-01 (< index). -> Ineligible (Outcome before index)
-  # P4: Obs NOT OK (starts 2010-01-01). -> Ineligible
-  # P5: Obs OK. No Exp 101. Out 201 @ 2014-09-10 (> index). -> Eligible
-  # P6: Obs OK (2006-06-01 - 2017-05-31). No Exp 101. Out 201 @ 2010-10-10 (> index). -> Eligible
-  # P7: Obs OK (2009-06-01 - 2021-05-31). No Exp 101. Out 201 @ 2012-04-01 (> index). -> Eligible
-  # P8: Obs NOT OK (starts 2011-06-01). -> Ineligible
-  # Risk Set for P3: {P5, P6, P7}
-  # Matching for P3 (Gender M, YoB 1990, Ratio 2):
-  # Filter by Gender M: {P5, P7}
-  # Calculate Age Diff: P5 (abs(1980-1990)=10), P7 (abs(1992-1990)=2)
-  # Sort & Slice (n=2): {P7, P5}
+  # --- Detailed checks for Exposed Person 3 (P3) ---
+  # Case P3: ID=3, Index=2009-11-01, YoB=1990, Gender=M, Washout=2yrs
+  # Risk Set Criteria for P3 (IndexDate_P3 = 2009-11-01):
+  #   1. ObservedAtIdx: obs_start <= IndexDate_P3 <= obs_end
+  #   2. PriorObsOk: (obs_start + 2yr) <= IndexDate_P3
+  #   3. UnexposedAtIdx: is.na(exp_date) OR exp_date > IndexDate_P3
+  #   4. OutcomeFreeAtIdx: is.na(out_date) OR out_date > IndexDate_P3
+  #
+  # Evaluating Potential Controls for P3:
+  # P2 (ID=2, obs_start=2000-01-01, out=2006-05-01, exp=NA):
+  #   C1:Yes. C2:Yes. C3:Yes. C4:No (2006-05-01 !> 2009-11-01). -> OUT
+  # P4 (ID=4, obs_start=2007-01-01, out=NA, exp=2012-07-01):
+  #   C1:Yes. C2:Yes (2007-01-01+2yr <= 2009-11-01). C3:Yes (2012-07-01 > 2009-11-01). C4:Yes (NA). -> IN (Female)
+  # P5 (ID=5, obs_start=2002-06-01, out=2014-09-10, exp=NA):
+  #   C1:Yes. C2:Yes. C3:Yes. C4:Yes (2014-09-10 > 2009-11-01). -> IN (Male)
+  # P6 (ID=6, obs_start=2000-01-01, out=2010-10-10, exp=NA):
+  #   C1:Yes. C2:Yes. C3:Yes. C4:Yes (2010-10-10 > 2009-11-01). -> IN (Female)
+  # P7 (ID=7, obs_start=2007-06-01, out=2012-04-01, exp=NA):
+  #   C1:Yes. C2:Yes (2007-06-01+2yr <= 2009-11-01). C3:Yes. C4:Yes (2012-04-01 > 2009-11-01). -> IN (Male)
+  # P8 (ID=8, obs_start=2008-06-01, out=NA, exp=2013-05-05):
+  #   C1:Yes. C2:No (2008-06-01+2yr !<= 2009-11-01). -> OUT
+  #
+  # Final Risk Set for P3: {P4, P5, P6, P7}
+  # Matching for P3 (Male, YoB 1990, Ratio 2):
+  #   Gender Filter (Male): {P5, P7}
+  #   Age Diff (vs 1990): P7(YoB 1992, diff=2), P5(YoB 1980, diff=10)
+  #   Sorted by Age Diff: {P7, P5}
+  #   Matched (top 2): {P7, P5}
   p3_set <- result1$matchedData %>% dplyr::filter(set_id == 2)
-  expect_equal(nrow(p3_set), 3) # Exposed + 2 Controls
+  expect_equal(nrow(p3_set), 3)  # Exposed + 2 controls
   expect_equal(p3_set$person_id[p3_set$exposure_status == 1], 3)
-  expect_equal(sort(p3_set$person_id[p3_set$exposure_status == 0]), c(5, 7))
+  expect_equal(sort(p3_set$person_id[p3_set$exposure_status == 0]), c(5, 7)) # Matched to P5 and P7
   expect_true(all(p3_set$index_date == as.Date("2009-11-01")))
   
   # --- Test Case 2: Match Ratio 1 ---
-  result2 <- performPairMatching(exposedCohortDefinition, controlsPoolBaseOutcome,
-                                 exposureDatesCurrentExposure, 1, # matchRatio = 1
-                                 exposureId, outcomeId)
+  result2 <- performPairMatching(exposedCohortDefinition, controlsPool,
+                                 1, # matchRatio = 1
+                                 exposureId, outcomeId, washoutYears_test)
   expect_equal(result2$nMatchedExposed, 2)
   p1_set_ratio1 <- result2$matchedData %>% dplyr::filter(set_id == 1)
   p3_set_ratio1 <- result2$matchedData %>% dplyr::filter(set_id == 2)
   expect_equal(nrow(p1_set_ratio1), 2) # P1 + P5
-  expect_equal(nrow(p3_set_ratio1), 2) # P3 + P7 (closest age match)
+  expect_equal(p1_set_ratio1$person_id[p1_set_ratio1$exposure_status == 0], 5)
+  expect_equal(nrow(p3_set_ratio1), 2) # P3 + P7
   expect_equal(p3_set_ratio1$person_id[p3_set_ratio1$exposure_status == 0], 7)
   
   # --- Test Case 3: No controls found for one exposed ---
   exposedCohortDefinition_P1_only <- exposedCohortDefinition %>% dplyr::filter(exposed_person_id == 1)
-  controlsPoolBaseOutcome_no_males <- controlsPoolBaseOutcome %>% dplyr::filter(gender_concept_id != 8507)
+  controlsPoolBaseOutcome_no_males <- controlsPool %>% dplyr::filter(gender_concept_id != 8507)
   result3 <- performPairMatching(exposedCohortDefinition_P1_only, controlsPoolBaseOutcome_no_males,
-                                 exposureDatesCurrentExposure, matchRatio,
-                                 exposureId, outcomeId)
+                                 matchRatio,
+                                 exposureId, outcomeId, washoutYears_test)
   expect_equal(result3$nMatchedExposed, 0)
   expect_null(result3$matchedData)
   
   # --- Test Case 4: Empty exposed cohort ---
-  result4 <- performPairMatching(tibble::tibble(), controlsPoolBaseOutcome,
-                                 exposureDatesCurrentExposure, matchRatio,
-                                 exposureId, outcomeId)
+  result4 <- performPairMatching(tibble::tibble(), controlsPool, matchRatio,
+                                 exposureId, outcomeId, washoutYears_test)
   expect_equal(result4$nMatchedExposed, 0)
   expect_null(result4$matchedData)
 })

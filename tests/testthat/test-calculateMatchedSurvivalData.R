@@ -60,45 +60,65 @@ mock_filterByWashoutAndGetOutcomeDates <- function(cohortBase, allConditionDates
   )
 }
 
-mock_defineExposedCohortForPair <- function(cohortBaseForOutcome, allConditionFirstDates, outcomeDatesCurrentOutcome, exposureId, outcomeId, session = NULL) {
-  # Default: Define based on E1=101, O1=201
-  # Assuming cohortBaseForOutcome has IDs 1, 3:10
-  # Exposed to E1: P1(2005), P2(2006 - not in base), P6(2003)
-  # P1 outcome O1 at 2008, P6 outcome O1 at 2007. Exposure before outcome for both.
-  exposed_ids_e1 <- c(1, 6)
-  exposed_dates_e1 <- allConditionFirstDates %>% dplyr::filter(concept_id == 101) %>% dplyr::select(person_id, exposure_date = condition_start_date)
+mock_defineExposedCohortForPair <- function(cohortBaseForOutcome, allConditionFirstDates, outcomeDatesCurrentOutcome, exposureId, outcomeId, washoutYears, session = NULL) {
   
-  # Exposed to E2=102: P3(2007), P7(2008)
-  # P3 outcome O1 at 2009, P7 outcome O2 at 2009. Exposure before outcome for both.
-  exposed_ids_e2 <- c(3, 7)
-  exposed_dates_e2 <- allConditionFirstDates %>% dplyr::filter(concept_id == 102) %>% dplyr::select(person_id, exposure_date = condition_start_date)
-  
-  
-  if(exposureId == 101) {
-    exposed_ids <- exposed_ids_e1
-    exposure_dates <- exposed_dates_e1
-  } else if(exposureId == 102) {
-    exposed_ids <- exposed_ids_e2
-    exposure_dates <- exposed_dates_e2
-  } else {
-    exposed_ids <- integer()
-    exposure_dates <- tibble::tibble(person_id = integer(), exposure_date = as.Date(character()))
+  if (is.null(cohortBaseForOutcome) || nrow(cohortBaseForOutcome) == 0) {
+    return(list(exposed = NULL, exposureDates = NULL))
   }
   
-  # Filter exposed based on who is actually IN the current cohortBaseForOutcome
-  valid_exposed_ids <- intersect(exposed_ids, cohortBaseForOutcome$person_id)
-  exposed_def <- cohortBaseForOutcome %>%
-    dplyr::filter(person_id %in% valid_exposed_ids) %>%
-    dplyr::left_join(exposure_dates, by = "person_id") %>%
-    dplyr::select(exposed_person_id = person_id, index_date = exposure_date, year_of_birth, gender_concept_id)
+  # Get potential exposure dates just to return them
+  exposure_dates_all <- allConditionFirstDates %>%
+    dplyr::filter(concept_id == exposureId) %>%
+    dplyr::select(person_id, exposure_date = condition_start_date)
+  exposure_dates_in_base <- exposure_dates_all %>%
+    dplyr::filter(person_id %in% cohortBaseForOutcome$person_id)
   
-  list(
-    exposed = exposed_def,
-    exposureDates = exposure_dates %>% dplyr::filter(person_id %in% cohortBaseForOutcome$person_id) # Only return dates for people eligible for outcome
-  )
+  
+  # --- Predefined results based ONLY on Exposure ID ---
+  # Assume P1, P6 are potentially exposed for E1
+  # Assume P3, P7 are potentially exposed for E2
+  # (These assumptions are based on the mock data where these individuals
+  # have the exposure and pass basic checks like washout/obs period,
+  # the simple mock ignores the specific E<O check for simplicity)
+  exposed_ids <- c()
+  if(exposureId == 101) {
+    exposed_ids <- c(1, 6)
+  } else if (exposureId == 102) {
+    exposed_ids <- c(3, 7)
+  }
+  
+  # Filter predefined IDs by who is actually in the current base cohort
+  valid_exposed_ids <- intersect(exposed_ids, cohortBaseForOutcome$person_id)
+  
+  if (length(valid_exposed_ids) == 0) {
+    # Return NULL exposed, but the relevant exposureDates
+    return(list(exposed = NULL, exposureDates = exposure_dates_in_base))
+  }
+  
+  # Create a minimal exposed tibble structure based on predefined IDs
+  # Get minimal required info from cohortBaseForOutcome
+  mock_exposed_def <- cohortBaseForOutcome %>%
+    dplyr::filter(person_id %in% valid_exposed_ids) %>%
+    dplyr::left_join(exposure_dates_in_base, by = "person_id") %>% # Need date for index_date
+    dplyr::select(exposed_person_id = person_id,
+                  # Use the actual exposure date from mock data if available
+                  index_date = exposure_date,
+                  year_of_birth,
+                  gender_concept_id) %>%
+    # Make sure date is not NA if a person was selected (shouldn't happen with filter+left_join but safe)
+    dplyr::filter(!is.na(index_date)) %>%
+    dplyr::distinct(exposed_person_id, index_date, .keep_all = TRUE)
+  
+  
+  # Final check in case filtering removed everyone (e.g., missing date)
+  if(nrow(mock_exposed_def) == 0) {
+    return(list(exposed = NULL, exposureDates = exposure_dates_in_base))
+  }
+  
+  return(list(exposed = mock_exposed_def, exposureDates = exposure_dates_in_base))
 }
 
-mock_performPairMatching <- function(exposedCohortDefinition, controlsPoolBaseOutcome, exposureDatesCurrentExposure, matchRatio, exposureId, outcomeId, session = NULL) {
+mock_performPairMatching <- function(exposedCohortDefinition, controlsPool, matchRatio, exposureId, outcomeId, washoutYears, session = NULL) {
   # Default: Assume we can match P1 to P3, P4; and P6 to P5 for E1/O1
   # Assume we can match P3 to P1, P4; and P7 to P9, P10 for E2/O1 (if P1, P4 in controlsPool)
   # Assume we can match P3 to P1; and P7 to P9 for E2/O2 (if P1, P9 in controlsPool)
@@ -116,7 +136,7 @@ mock_performPairMatching <- function(exposedCohortDefinition, controlsPoolBaseOu
   for(i in 1:n_exposed) {
     exposed_person <- exposedCohortDefinition[i,]
     # Find some arbitrary controls from the pool (ensure they are not the exposed person)
-    potential_controls <- controlsPoolBaseOutcome %>% dplyr::filter(person_id != exposed_person$exposed_person_id)
+    potential_controls <- controlsPool %>% dplyr::filter(person_id != exposed_person$exposed_person_id)
     # Simple mock: grab first few available based on matchRatio, ignore dates/age/gender for mock simplicity
     n_controls_to_get <- min(matchRatio, nrow(potential_controls))
     if (n_controls_to_get > 0) {
@@ -221,7 +241,7 @@ test_that("calculateMatchedSurvivalData happy path (1 Exposure, 1 Outcome)", {
   pair_result <- results$pair_101_201
   expect_type(pair_result, "list")
   expect_named(pair_result, c("survivalData", "exposureId", "outcomeId", "exposureLabel", "outcomeLabel",
-                              "nExposedIncludedInMatching", "nExposedMatched", "nUnexposedMatched", "nTotalPersonsInAnalysis"))
+                              "nExposedIdentifiedInitial", "nExposedMatched", "nUnexposedMatched", "nTotalPersonsInAnalysis"))
   
   expect_s3_class(pair_result$survivalData, "tbl_df")
   # Check counts based on mock logic (E1/O1: Exposed P1, P6 initially)
@@ -230,7 +250,7 @@ test_that("calculateMatchedSurvivalData happy path (1 Exposure, 1 Outcome)", {
   expect_equal(pair_result$outcomeId, 201)
   expect_equal(pair_result$exposureLabel, "Exposure A")
   expect_equal(pair_result$outcomeLabel, "Outcome X")
-  expect_equal(pair_result$nExposedIncludedInMatching, 2) # Mock defines P1, P6 as exposed for E1 after washout for O1
+  expect_equal(pair_result$nExposedIdentifiedInitial, 2) # Mock defines P1, P6 as exposed for E1 after washout for O1
   expect_equal(pair_result$nExposedMatched, 2) # Mock matches both P1 and P6
   expect_gt(pair_result$nUnexposedMatched, 0) # Mock adds controls
   expect_equal(pair_result$nTotalPersonsInAnalysis, nrow(pair_result$survivalData))
@@ -274,7 +294,7 @@ test_that("calculateMatchedSurvivalData handles multiple pairs", {
   expect_equal(pair_result_102_202$exposureLabel, "Exposure B")
   expect_equal(pair_result_102_202$outcomeLabel, "Outcome Y")
   # Based on mock: E2=102, O2=202. Base cohort after O2 washout excludes P8. Exposed E2 are P3, P7. Both are in base.
-  expect_equal(pair_result_102_202$nExposedIncludedInMatching, 2)
+  expect_equal(pair_result_102_202$nExposedIdentifiedInitial, 2)
   expect_equal(pair_result_102_202$nExposedMatched, 2) # Mock matches all defined exposed
   expect_gt(pair_result_102_202$nUnexposedMatched, 0)
 })

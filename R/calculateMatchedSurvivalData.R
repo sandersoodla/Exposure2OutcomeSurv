@@ -13,7 +13,10 @@
 #'   `concept_id` and `concept_name_id` (where `concept_name_id` holds the label).
 #'   Used for labeling results.
 #' @param matchRatio The target number of controls to match to each exposed person.
-#' @param washoutYears The washout period in years applied relative to each outcome.
+#' @param washoutYears The washout period in years. This is used to:
+#'   1. Define a required period of observation before an outcome event for initial cohort eligibility (`filterByWashoutAndGetOutcomeDates`).
+#'   2. Define a required period of observation before an exposure event for an individual to be included in the exposed cohort (`defineExposedCohortForPair`).
+#'   3. Define a required period of observation for a control *prior to the matched exposed's index date* (`performPairMatching`).
 #' @param session Optional. The Shiny session object. If provided, notifications
 #'   will be shown in the Shiny UI. Otherwise, messages are printed to the console.
 #'
@@ -26,7 +29,7 @@
 #'     \item{outcomeId}{Numeric ID of the outcome.}
 #'     \item{exposureLabel}{Character label for the exposure (from `conceptLabelLookup`).}
 #'     \item{outcomeLabel}{Character label for the outcome (from `conceptLabelLookup`).}
-#'     \item{nExposedIncludedInMatching}{Count of exposed individuals after checking for prior outcomes.}
+#'     \item{nExposedIdentifiedInitial}{Count of exposed individuals after initial definition (meeting exposure washout and outcome post-exposure criteria).}
 #'     \item{nExposedMatched}{Count of exposed individuals successfully matched to >=1 control.}
 #'     \item{nUnexposedMatched}{Total count of matched unexposed controls.}
 #'     \item{nTotalPersonsInAnalysis}{Total number of rows (persons) in the final `survivalData` for the pair.}
@@ -98,8 +101,8 @@ calculateMatchedSurvivalData <- function(selectedExposureIds,
     prepOutcomeNotifId <- paste0("prep_outcome_", outcomeIdStr)
     .notifyUser(paste("Preparing analysis for Outcome ID:", outcomeIdStr), duration = NA, id = prepOutcomeNotifId, session = session)
     
-    # --- 5a. Filter by Washout & Get Outcome Dates ---
-
+    # --- 5a. Filter by Outcome Washout & Get Outcome Dates ---
+    # This creates a base cohort eligible for this outcome (met outcome washout)
     washoutFilterResult <- filterByWashoutAndGetOutcomeDates(
       cohortBase = fullCohortBase,
       allConditionDates = allConditionFirstDates,
@@ -136,12 +139,14 @@ calculateMatchedSurvivalData <- function(selectedExposureIds,
       .notifyUser(paste("Processing Exposure ID:", exposureIdStr, "for Outcome ID:", outcomeIdStr), duration = NA, id = procPairNotifId, session = session)
       
       # --- 6a. Define Exposed Cohort for this Pair ---
+      # Exposed individuals must meet exposure washout and have outcome (if any) after exposure.
       exposedResult <- defineExposedCohortForPair(
         cohortBaseForOutcome = cohortBaseForOutcome,
         allConditionFirstDates = allConditionFirstDates,
         outcomeDatesCurrentOutcome = outcomeDatesCurrentOutcome,
         exposureId = exposureId,
         outcomeId = outcomeId,
+        washoutYears = washoutYears,
         session = session
       )
       
@@ -155,16 +160,24 @@ calculateMatchedSurvivalData <- function(selectedExposureIds,
         next # Skip to next exposureId
       }
       
-      nExposedIdentifiedInitial <- nrow(exposedCohortDefinition) # Exposed after prior outcome check
+      nExposedIdentifiedInitial <- nrow(exposedCohortDefinition) # Exposed after washout and prior outcome check
       
-      # --- 6b. Perform Matching for this Pair ---
+      
+      # --- 6b. Define Controls Pool for this Pair ---
+      # Starts with controlsPoolBaseOutcome (passed outcome washout).
+      # No further exposure-related washout applied here; that's handled in performPairMatching.
+      controlsPoolForPair <- controlsPoolBaseOutcome %>%
+        dplyr::left_join(exposureDatesCurrentExposure, by = "person_id") # add exposure dates
+      
+      
+      # --- 6c. Perform Matching for this Pair ---
       matchingResult <- performPairMatching(
-        exposedCohortDefinition = exposedCohortDefinition,
-        controlsPoolBaseOutcome = controlsPoolBaseOutcome,
-        exposureDatesCurrentExposure = exposureDatesCurrentExposure,
+        exposedCohort = exposedCohortDefinition,
+        controlsPool = controlsPoolForPair,
         matchRatio = matchRatio,
         exposureId = exposureId,
         outcomeId = outcomeId,
+        washoutYears = washoutYears,
         session = session
       )
       
@@ -179,15 +192,15 @@ calculateMatchedSurvivalData <- function(selectedExposureIds,
       }
       # Matching complete notification shown by helper
       
-      # --- 6c. Calculate Survival for this Matched Pair ---
+      # --- 6d. Calculate Survival for this Matched Pair ---
       survivalDataCurrentPair <- calculatePairSurvival(
         matchedDataFinal = matchedDataFinal,
-        cohortBaseForOutcome = cohortBaseForOutcome,
+        cohortBaseForOutcome = cohortBaseForOutcome, # Used to get observation periods for all matched individuals
         outcomeDatesCurrentOutcome = outcomeDatesCurrentOutcome,
         session = session
       )
       
-      # --- 6d. Store Results if Survival Data is Valid ---
+      # --- 6e. Store Results if Survival Data is Valid ---
       # Check if the returned tibble is valid (not NULL) and has rows
       if (!is.null(survivalDataCurrentPair) && nrow(survivalDataCurrentPair) > 0) {
         # Lookup labels, provide fallback if not found
@@ -201,7 +214,7 @@ calculateMatchedSurvivalData <- function(selectedExposureIds,
           survivalData = survivalDataCurrentPair,
           exposureId = exposureId, outcomeId = outcomeId,
           exposureLabel = exposureLabel, outcomeLabel = outcomeLabel,
-          nExposedIncludedInMatching = nExposedIdentifiedInitial,
+          nExposedIdentifiedInitial = nExposedIdentifiedInitial,
           nExposedMatched = nExposedMatched,
           nUnexposedMatched = sum(survivalDataCurrentPair$exposure_status == 0),
           nTotalPersonsInAnalysis = nrow(survivalDataCurrentPair)

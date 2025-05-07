@@ -5,32 +5,33 @@
 \title{Perform Incidence Density Matching for an Exposure-Outcome Pair}
 \usage{
 performPairMatching(
-  exposedCohortDefinition,
-  controlsPoolBaseOutcome,
-  exposureDatesCurrentExposure,
+  exposedCohort,
+  controlsPool,
   matchRatio,
   exposureId,
   outcomeId,
+  washoutYears,
   session = NULL
 )
 }
 \arguments{
-\item{exposedCohortDefinition}{A tibble of exposed individuals eligible for
+\item{exposedCohort}{A tibble of exposed individuals eligible for
 matching, as returned by \code{defineExposedCohortForPair}. Must contain
 \code{exposed_person_id}, \code{index_date}, \code{year_of_birth}, \code{gender_concept_id}.}
 
-\item{controlsPoolBaseOutcome}{A tibble representing the potential control
-pool (passed outcome washout), containing \code{person_id}, \code{year_of_birth},
-\code{gender_concept_id}, \code{obs_start_date}, \code{obs_end_date}, and potentially \code{outcome_date}.}
-
-\item{exposureDatesCurrentExposure}{A tibble containing \code{person_id} and
-\code{exposure_date} for the specific exposure being matched.}
+\item{controlsPool}{A tibble representing the potential control
+pool (passed outcome washout). Required columns: \code{person_id},
+\code{year_of_birth}, \code{gender_concept_id}, \code{obs_start_date}, \code{obs_end_date},
+\code{outcome_date} (can be NA), \code{exposure_date} (can be NA).}
 
 \item{matchRatio}{The target number of controls to match to each exposed person.}
 
 \item{exposureId}{The numeric concept ID of the exposure (for notifications).}
 
 \item{outcomeId}{The numeric concept ID of the outcome (for notifications).}
+
+\item{washoutYears}{The washout period in years, used to ensure unexposed controls have
+a sufficient observation window prior to the exposed's \code{index_date}.}
 
 \item{session}{Optional. The Shiny session object.}
 }
@@ -45,8 +46,16 @@ Returns \code{NULL} for \code{matchedData} if no matched sets could be created.
 \description{
 Matches unexposed controls to exposed individuals based on incidence density
 sampling principles. Matching is performed on gender (exact) and age
-(nearest neighbor based on year of birth) within the risk set at the
-exposed individual's index date. Controls must be free of both the specific
-exposure and outcome prior to the index date.
+(nearest neighbor based on year of birth). Controls are selected from the
+risk set at the exposed individual's index date.
+}
+\details{
+Control Eligibility Criteria applied within this function:
+\enumerate{
+\item Must be under observation at the case's \code{index_date}.
+\item Must have at least \code{washoutYears} of observation time \emph{prior} to the case's \code{index_date}.
+\item Must be free of the specific exposure event \emph{prior to or on} the case's \code{index_date}.
+\item Must be free of the specific outcome event \emph{prior to or on} the case's \code{index_date}.
+}
 }
 \keyword{internal}

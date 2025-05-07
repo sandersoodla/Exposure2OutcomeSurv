@@ -81,7 +81,7 @@ fetchDataForSurvAnalysis <- function(cdm, allConceptIdsToFetch, session = NULL) 
 
 
 
-#' Filter Cohort by Washout and Get Corresponding Outcome Dates
+#' Filter Cohort by Outcome Washout and Get Corresponding Outcome Dates
 #'
 #' Filters a base cohort based on a washout period for a specific outcome ID.
 #' It also extracts and returns a table containing the first occurrence dates
@@ -157,10 +157,11 @@ filterByWashoutAndGetOutcomeDates <- function(cohortBase, allConditionDates, out
 
 #' Define Exposed Cohort for a Specific Exposure-Outcome Pair
 #'
-#' Identifies individuals exposed to a specific condition within a
-#' pre-filtered (washout-applied) cohort. Ensures exposure occurs within
-#' the observation period and that the outcome (if present for the person)
-#' occurs strictly *after* the exposure date.
+#' Identifies individuals exposed to a specific condition (`exposureId`) from a
+#' base cohort (already filtered by outcome washout), ensuring their exposure
+#' occurs AFTER the specified washout period relative to observation start,
+#' and BEFORE any occurrence of the specified outcome condition (`outcomeId`).
+#' Returns the filtered exposed cohort table and their exposure dates.
 #'
 #' @param cohortBaseForOutcome A tibble representing the cohort that has already
 #'   passed the outcome-specific washout, as returned by `filterByWashoutAndGetOutcomeDates`.
@@ -170,6 +171,8 @@ filterByWashoutAndGetOutcomeDates <- function(cohortBase, allConditionDates, out
 #'   for the specific outcome being analyzed in the current loop iteration.
 #' @param exposureId The numeric concept ID of the exposure condition.
 #' @param outcomeId The numeric concept ID of the outcome condition.
+#' @param washoutYears The washout period in years. Exposure must occur on or after
+#'   `obs_start_date + washoutYears`.
 #' @param session Optional. The Shiny session object.
 #'
 #' @return A list containing:
@@ -186,6 +189,7 @@ defineExposedCohortForPair <- function(cohortBaseForOutcome,
                                        outcomeDatesCurrentOutcome,
                                        exposureId,
                                        outcomeId,
+                                       washoutYears,
                                        session = NULL) {
   
   if (is.null(cohortBaseForOutcome) || nrow(cohortBaseForOutcome) == 0) {
@@ -204,7 +208,11 @@ defineExposedCohortForPair <- function(cohortBaseForOutcome,
   # Identify exposed individuals from the outcome-specific eligible cohort
   exposedCohortDefinition <- cohortBaseForOutcome %>%
     dplyr::inner_join(exposureDatesCurrentExposure, by = "person_id") %>%
-    dplyr::left_join(outcomeDatesCurrentOutcome, by = "person_id") %>% # Join specific outcome dates again
+    # Apply exposure washout
+    dplyr::mutate(washout_end_date = obs_start_date %m+% lubridate::years(washoutYears)) %>%
+    dplyr::filter(exposure_date >= washout_end_date) %>%
+  
+    dplyr::left_join(outcomeDatesCurrentOutcome, by = "person_id") %>% # Join specific outcome dates
     dplyr::filter(!is.na(exposure_date)) %>%
     # Keep only the observation period where the exposure happened
     dplyr::filter(exposure_date >= obs_start_date & exposure_date <= obs_end_date) %>%
@@ -233,21 +241,27 @@ defineExposedCohortForPair <- function(cohortBaseForOutcome,
 #'
 #' Matches unexposed controls to exposed individuals based on incidence density
 #' sampling principles. Matching is performed on gender (exact) and age
-#' (nearest neighbor based on year of birth) within the risk set at the
-#' exposed individual's index date. Controls must be free of both the specific
-#' exposure and outcome prior to the index date.
+#' (nearest neighbor based on year of birth). Controls are selected from the
+#' risk set at the exposed individual's index date.
+#' 
+#' Control Eligibility Criteria applied within this function:
+#' 1. Must be under observation at the case's `index_date`.
+#' 2. Must have at least `washoutYears` of observation time *prior* to the case's `index_date`.
+#' 3. Must be free of the specific exposure event *prior to or on* the case's `index_date`.
+#' 4. Must be free of the specific outcome event *prior to or on* the case's `index_date`.
 #'
-#' @param exposedCohortDefinition A tibble of exposed individuals eligible for
+#' @param exposedCohort A tibble of exposed individuals eligible for
 #'   matching, as returned by `defineExposedCohortForPair`. Must contain
 #'   `exposed_person_id`, `index_date`, `year_of_birth`, `gender_concept_id`.
-#' @param controlsPoolBaseOutcome A tibble representing the potential control
-#'   pool (passed outcome washout), containing `person_id`, `year_of_birth`,
-#'   `gender_concept_id`, `obs_start_date`, `obs_end_date`, and potentially `outcome_date`.
-#' @param exposureDatesCurrentExposure A tibble containing `person_id` and
-#'   `exposure_date` for the specific exposure being matched.
+#' @param controlsPool A tibble representing the potential control
+#'   pool (passed outcome washout). Required columns: `person_id`,
+#'   `year_of_birth`, `gender_concept_id`, `obs_start_date`, `obs_end_date`,
+#'   `outcome_date` (can be NA), `exposure_date` (can be NA).
 #' @param matchRatio The target number of controls to match to each exposed person.
 #' @param exposureId The numeric concept ID of the exposure (for notifications).
 #' @param outcomeId The numeric concept ID of the outcome (for notifications).
+#' @param washoutYears The washout period in years, used to ensure unexposed controls have
+#'   a sufficient observation window prior to the exposed's `index_date`.
 #' @param session Optional. The Shiny session object.
 #'
 #' @return A list containing:
@@ -258,28 +272,24 @@ defineExposedCohortForPair <- function(cohortBaseForOutcome,
 #' Returns `NULL` for `matchedData` if no matched sets could be created.
 #'
 #' @keywords internal
-performPairMatching <- function(exposedCohortDefinition,
-                                controlsPoolBaseOutcome,
-                                exposureDatesCurrentExposure,
+performPairMatching <- function(exposedCohort,
+                                controlsPool,
                                 matchRatio,
                                 exposureId,
                                 outcomeId,
+                                washoutYears,
                                 session = NULL) {
   
-  if (is.null(exposedCohortDefinition) || nrow(exposedCohortDefinition) == 0) {
+  if (is.null(exposedCohort) || nrow(exposedCohort) == 0) {
     return(list(matchedData = NULL, nMatchedExposed = 0))
   }
   
   uniquePairKey <- paste0("pair_", exposureId, "_", outcomeId)
   matchProgId <- paste0("match_prog_", uniquePairKey)
   
-  # Prepare potential controls pool by adding exposure date info
-  potentialControlsPool <- controlsPoolBaseOutcome %>%
-    dplyr::left_join(exposureDatesCurrentExposure, by="person_id")
-  
   matchedSetsList <- list()
   nExposedMatched <- 0
-  totalExposedToMatch <- nrow(exposedCohortDefinition)
+  totalExposedToMatch <- nrow(exposedCohort)
   
   .notifyUser(
     paste0("Starting matching for Exp:", exposureId, ", Out:", outcomeId, " (", totalExposedToMatch, " exposed)"),
@@ -288,21 +298,27 @@ performPairMatching <- function(exposedCohortDefinition,
   on.exit(.removeUserNotify(id = matchProgId, session = session), add = TRUE)
   
   for (i in 1:totalExposedToMatch) {
-    currentExposed <- exposedCohortDefinition[i, ]
+    currentExposed <- exposedCohort[i, ]
     exposedPersonId <- currentExposed$exposed_person_id
     exposureIndexDate <- currentExposed$index_date
     exposedBirthYear <- currentExposed$year_of_birth
     exposedGender <- currentExposed$gender_concept_id
     
     # Define Risk Set for this Exposed Person
-    # Controls must be observed at index date and free of exposure & outcome before index date
-    riskSet <- potentialControlsPool %>%
+    riskSet <- controlsPool %>%
       dplyr::filter(
         person_id != exposedPersonId,
+        # CRITERION 1: Control must be under observation on exposed's exposure date
         obs_start_date <= exposureIndexDate,
         obs_end_date >= exposureIndexDate,
-        is.na(exposure_date) | exposure_date > exposureIndexDate, # Free of exposure up to index
-        is.na(outcome_date) | outcome_date > exposureIndexDate   # Free of outcome up to index
+        # CRITERION 2: Control must have `washoutYears` of observation before exposed case's index_date
+        (obs_start_date %m+% lubridate::years(washoutYears)) <= exposureIndexDate,
+        
+        # CRITERION 3: Control is UNEXPOSED to this specific exposure AT case's index_date
+        is.na(exposure_date) | exposure_date > exposureIndexDate,
+        
+        # CRITERION 4: Control is FREE of the current main outcome AT case's index_date
+        is.na(outcome_date) | outcome_date > exposureIndexDate
       )
     
     matchedControlsDf <- NULL
