@@ -86,7 +86,10 @@ Used for labeling results.</p></dd>
 
 
 <dt id="arg-washoutyears">washoutYears<a class="anchor" aria-label="anchor" href="#arg-washoutyears"></a></dt>
-<dd><p>The washout period in years applied relative to each outcome.</p></dd>
+<dd><p>The washout period in years. This is used to:</p><ol><li><p>Define a required period of observation before an outcome event for initial cohort eligibility (<code>filterByWashoutAndGetOutcomeDates</code>).</p></li>
+<li><p>Define a required period of observation before an exposure event for an individual to be included in the exposed cohort (<code>defineExposedCohortForPair</code>).</p></li>
+<li><p>Define a required period of observation for a control <em>prior to the matched exposed's index date</em> (<code>performPairMatching</code>).</p></li>
+</ol></dd>
 
 
 <dt id="arg-session">session<a class="anchor" aria-label="anchor" href="#arg-session"></a></dt>
@@ -113,8 +116,8 @@ a list containing:</p><dl><dt>survivalData</dt>
 <dt>outcomeLabel</dt>
 <dd><p>Character label for the outcome (from <code>conceptLabelLookup</code>).</p></dd>
 
-<dt>nExposedIncludedInMatching</dt>
-<dd><p>Count of exposed individuals after checking for prior outcomes.</p></dd>
+<dt>nExposedIdentifiedInitial</dt>
+<dd><p>Count of exposed individuals after initial definition (meeting exposure washout and outcome post-exposure criteria).</p></dd>
 
 <dt>nExposedMatched</dt>
 <dd><p>Count of exposed individuals successfully matched to &gt;=1 control.</p></dd>
