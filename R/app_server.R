@@ -303,6 +303,13 @@ app_server <- function(input, output, session) {
   
   # --- Survival Analysis Computation, Plot Generation, and saving (Triggered by Button) ---
   observeEvent(input$runAnalysis, {
+    # --- Disable Button ---
+    shinyjs::disable("runAnalysis")
+    # Re-enable on exit
+    on.exit({
+      shinyjs::enable("runAnalysis")
+    })
+    
     req(input$exposureConditionIds, input$outcomeConditionIds, cdm) 
     req(input$saveFileName, cancelOutput = TRUE)
     

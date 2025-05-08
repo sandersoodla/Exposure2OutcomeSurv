@@ -3,6 +3,7 @@
 # Define UI for application
 app_ui <- function(request) {
   fluidPage(
+    shinyjs::useShinyjs(),
     theme = bslib::bs_theme(bootswatch = "cerulean"),
     
     fluidRow(
