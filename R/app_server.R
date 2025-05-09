@@ -276,29 +276,6 @@ app_server <- function(input, output, session) {
   })
   
   
-  ############### TRAJECTORY DATA
-  
-  
-  # Reactive expression to fetch data when the button is clicked
-  trajectoriesData <- eventReactive(input$runAnalysis, {
-    req(length(input$exposureConditionIds) > 0)
-    req(length(input$outcomeConditionIds) > 0)
-    
-    df <- getTrajectoriesForCondition(cdm, input$exposureConditionIds)
-    return(df)
-  })
-  
-  # Update the patient timeline selector options when trajectories Data changes
-  observeEvent(trajectoriesData(), {
-    updateSelectizeInput(
-      session,
-      "selectedPatient",
-      choices = unique(trajectoriesData()$person_id),
-      server = TRUE
-    )
-  })
-  
-  
   #### SURVIVAL ANALYSIS
   
   # --- Survival Analysis Computation, Plot Generation, and saving (Triggered by Button) ---
@@ -703,7 +680,7 @@ app_server <- function(input, output, session) {
   })
   
   
-  ########### PATIENT TIMELINE AND PYRAMIDS
+  ########### CONDITION POPULATION PYRAMIDS
   
   
   # Module UI plotOutput
@@ -768,23 +745,7 @@ app_server <- function(input, output, session) {
       })
     }
   })
-  
-  # Render the patient timeline plot
-  output$patientTimeline <- renderPlot({
-    req(trajectoriesData())
-    req(input$selectedPatient)
-    patientData <- trajectoriesData() %>%
-      dplyr::filter(person_id == input$selectedPatient)
-    
-    ggplot2::ggplot(patientData, ggplot2::aes(x = condition_start_date, y = concept_name)) +
-      ggplot2::geom_point() +
-      ggplot2::labs(
-        title = paste("Condition timeline for Patient", input$selectedPatient),
-        x = "Date",
-        y = "Condition"
-      ) +
-      ggplot2::theme_minimal()
-  })
+
   
   
   session$onSessionEnded(function() {

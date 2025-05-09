@@ -124,15 +124,11 @@ app_ui <- function(request) {
           # UI Output container where the server will dynamically generate the grid of plots
           uiOutput("kmPlotsUI")
         ),
-        tabPanel("Demographic Overview", fluidRow(
-          column(6, uiOutput("startPyramidsUI")), column(6, uiOutput("targetPyramidsUI"))
-        ), ),
-        tabPanel(
-          "Patient Timeline",
-          selectizeInput("selectedPatient", "Select a Patient ID:", choices = NULL),
-          hr(),
-          plotOutput("patientTimeline")
-        )
+        tabPanel("Demographic Overview",
+          fluidRow(
+            column(6, uiOutput("startPyramidsUI")), column(6, uiOutput("targetPyramidsUI"))
+          ),
+        ),
       ), width = 9)
     )
   )
