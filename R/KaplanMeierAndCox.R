@@ -86,8 +86,25 @@ generateKmPlotObjects <- function(matchedSurvivalData, maxPlotTime = 1825, sessi
     
     dynamicYLim <- c(lowerYLim, 1.0)
     
-    # Calculate the p-value for storing it in the summary table
-    pValueInfo <- survminer::surv_pvalue(kmFit, data = survData)
+    # --- Check for zero outcome events before calculating p-value ---
+    eventCounts <- survData %>%
+      dplyr::filter(outcome_status == 1) %>%
+      dplyr::group_by(exposure_status) %>%
+      dplyr::summarise(events = dplyr::n(), .groups = "drop")
+    
+    exposedEvents <- eventCounts$events[eventCounts$exposure_status == 1]
+    unexposedEvents <- eventCounts$events[eventCounts$exposure_status == 0]
+    
+    if (length(exposedEvents) == 0) exposedEvents <- 0
+    if (length(unexposedEvents) == 0) unexposedEvents <- 0
+    
+    if (exposedEvents == 0 && unexposedEvents == 0) {
+      pValueInfo <- list(pval = NA_real_, pval.txt = "NE (zero events)")
+    } else {
+      # Calculate the p-value for storing it in the summary table
+      pValueInfo <- survminer::surv_pvalue(kmFit, data = survData)
+    }
+    
     
     # Construct the plot title using labels from the results list
     pairPlotTitle <- paste0("Exposure: ", pairResult$exposureLabel,
@@ -161,11 +178,36 @@ calculateCoxResults <- function(matchedSurvivalData) {
     currentSurvData <- pairData$survivalData
     
     # Initialize results for this pair
-    coxRes <- list(hazardRatio = NA_real_, hrCiLower = NA_real_, hrCiUpper = NA_real_, hrPvalue = NA_real_, coxError = NA_character_)
+    coxRes <- list(hazardRatio = NA_real_, hrCiLower = NA_real_, hrCiUpper = NA_real_, hrPvalue = NA_real_)
+    
+    # Check for zero outcome events in one or both groups
+    eventCounts <- currentSurvData %>%
+      dplyr::filter(outcome_status == 1) %>%
+      dplyr::group_by(exposure_status) %>%
+      dplyr::summarise(events = dplyr::n(), .groups = "drop")
+    
+    exposedEvents <- eventCounts$events[eventCounts$exposure_status == 1]
+    unexposedEvents <- eventCounts$events[eventCounts$exposure_status == 0]
+    
+    if (length(exposedEvents) == 0) exposedEvents <- 0
+    if (length(unexposedEvents) == 0) unexposedEvents <- 0
+    
+    if (exposedEvents == 0 && unexposedEvents == 0) {
+      coxResultsList[[pairKey]] <- coxRes
+      next
+    } else if (exposedEvents == 0) {
+      # HR would be 0, p-value often 1 or NA. Not very informative.
+      coxResultsList[[pairKey]] <- coxRes
+      next
+    } else if (unexposedEvents == 0) {
+      # HR would be Inf, p-value often 1 or NA. Not very informative.
+      coxResultsList[[pairKey]] <- coxRes
+      next
+    }
     
     # Fit Cox model with clustering on sets
     coxFit <- survival::coxph(survival::Surv(time_to_outcome, outcome_status) ~ exposure_status + cluster(set_id),
-                              data = currentSurvData, robust = TRUE)
+                              data = currentSurvData)
     
     summaryCox <- summary(coxFit)
     
