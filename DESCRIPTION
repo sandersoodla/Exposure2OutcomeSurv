@@ -1,6 +1,6 @@
 Package: Exposure2OutcomeSurv
 Title: Survival Analysis on Exposure and Outcome Condition Pairs
-Version: 0.1.1
+Version: 0.1.2
 Date: 2025-04-22
 Authors@R: 
     person("Sander", "Soodla", , "sandersoodla@gmail.com", role = c("aut", "cre"))

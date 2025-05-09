@@ -287,6 +287,13 @@ performPairMatching <- function(exposedCohort,
   uniquePairKey <- paste0("pair_", exposureId, "_", outcomeId)
   matchProgId <- paste0("match_prog_", uniquePairKey)
   
+  # Pre-calculate the date that signifies the end of the control's washout period
+  # A control is eligible if this date is on or before the exposed person's indexDate.
+  controlsPool <- controlsPool %>%
+    dplyr::mutate(
+      control_washout_fulfilled_by_date = obs_start_date %m+% lubridate::years(washoutYears)
+    )
+  
   matchedSetsList <- list()
   nExposedMatched <- 0
   totalExposedToMatch <- nrow(exposedCohort)
@@ -307,25 +314,24 @@ performPairMatching <- function(exposedCohort,
     # Define Risk Set for this Exposed Person
     riskSet <- controlsPool %>%
       dplyr::filter(
-        person_id != exposedPersonId,
+        person_id != exposedPersonId, gender_concept_id == exposedGender, # Filter by gender before other checks
         # CRITERION 1: Control must be under observation on exposed's exposure date
         obs_start_date <= exposureIndexDate,
         obs_end_date >= exposureIndexDate,
         # CRITERION 2: Control must have `washoutYears` of observation before exposed case's index_date
-        (obs_start_date %m+% lubridate::years(washoutYears)) <= exposureIndexDate,
+        control_washout_fulfilled_by_date <= exposureIndexDate,
         
         # CRITERION 3: Control is UNEXPOSED to this specific exposure AT case's index_date
         is.na(exposure_date) | exposure_date > exposureIndexDate,
         
-        # CRITERION 4: Control is FREE of the current main outcome AT case's index_date
+        # CRITERION 4: Control is free of the current main OUTCOME AT case's index_date
         is.na(outcome_date) | outcome_date > exposureIndexDate
       )
     
     matchedControlsDf <- NULL
     if (nrow(riskSet) > 0) {
-      # Perform matching (Nearest Neighbor on age, exact on gender)
+      # Perform matching (n nearest neighbors on age)
       matchedControlsDf <- riskSet %>%
-        dplyr::filter(gender_concept_id == exposedGender) %>%
         dplyr::mutate(age_diff = abs(year_of_birth - exposedBirthYear)) %>%
         dplyr::arrange(age_diff) %>%
         dplyr::slice_head(n = matchRatio)
