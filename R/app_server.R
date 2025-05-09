@@ -58,7 +58,7 @@ app_server <- function(input, output, session) {
   
   # Update choices for selectizeInput
   updateConditionChoices <- function(session, inputId) {
-    choiceList <- setNames(allOccurredConditions$concept_id, allOccurredConditions$concept_name_id)
+    choiceList <- setNames(as.character(allOccurredConditions$concept_id), allOccurredConditions$concept_name_id)
     updateSelectizeInput(session, inputId, choices = choiceList, server = TRUE,
                          options = list(
                            placeholder = "Type to search conditions",
@@ -106,7 +106,7 @@ app_server <- function(input, output, session) {
   
   # When an exposure condition file is uploaded, update the selected values:
   observeEvent(input$exposureConditionFile, {
-    req(input$exposureConditionFile)
+    req(input$exposureConditionFile, allOccurredConditions, cdm)
     
     # Extract condition concept IDs from file
     sourceIds <- extractConditionIds(input$exposureConditionFile)
@@ -119,160 +119,195 @@ app_server <- function(input, output, session) {
     # Map source concept ids to standard concept ids
     mapping <- mapInputToStandardIds(cdm, sourceIds)
     
-    # Identify unmapped source concept IDs
-    unmappedSourceIds <- setdiff(sourceIds, mapping$input_concept_id)
-    
-    # Check if there are any mappings
-    if (nrow(mapping) == 0) {
-      # If no mappings, then check which input IDs are already standard and exist in the dataset
-      occurredStandardIds <- sourceIds[sourceIds %in% allOccurredConditions$concept_id]
-    } else {
-      # Identify mapped standard IDs that occur in the dataset
-      occurredStandardIds <- mapping$standard_concept_id[mapping$standard_concept_id %in% allOccurredConditions$concept_id]
+    mappedAndOccurringIds <- numeric(0)
+    if (nrow(mapping) > 0) {
+      uniqueMappedStandards <- unique(stats::na.omit(mapping$standard_concept_id))
+      mappedAndOccurringIds <- uniqueMappedStandards[uniqueMappedStandards %in% allOccurredConditions$concept_id]
     }
     
-    # Create a detailed mapping table
-    mappingDetails <- mapping %>%
-      dplyr::mutate(status = as.character(
-        ifelse(
-          standard_concept_id %in% allOccurredConditions$concept_id,
-          "Mapped",
-          "Mapped, no occurrences"
-        )
-      ))
+    # Input IDs that are *already* standard and occur in the data
+    sourceIdsAlreadyStandardAndOccurring <- sourceIds[sourceIds %in% allOccurredConditions$concept_id]
     
-    # If there are unmapped source IDs, add them as separate rows
-    if (length(unmappedSourceIds) > 0) {
-      unmappedDf <- data.frame(
-        input_concept_id = unmappedSourceIds,
-        standard_concept_id = NA,
-        status = "Not mapped",
-        stringsAsFactors = FALSE
-      )
+    # Combine and get the final unique set of numeric IDs to be selected
+    occurredStandardIds <- unique(c(mappedAndOccurringIds, sourceIdsAlreadyStandardAndOccurring))
+    occurredStandardIds <- stats::na.omit(as.numeric(occurredStandardIds))
+    
+    # Create a detailed mapping table
+    mappingDetailsList <- lapply(sourceIds, function(currentInputId) { 
+      # Filter mapping for the currentInputId
+      mapsForCurrentId <- mapping %>% dplyr::filter(input_concept_id == currentInputId)
       
-      # Update the status to "Standard" if the unmapped ID is in allOccurredConditions
-      unmappedDf$status[unmappedDf$input_concept_id %in% allOccurredConditions$concept_id] <- "Standard"
-      
-      mappingDetails <- dplyr::bind_rows(mappingDetails, unmappedDf)
+      if (nrow(mapsForCurrentId) > 0) {
+        mapsForCurrentId %>%
+          dplyr::mutate(
+            status = dplyr::if_else(standard_concept_id %in% allOccurredConditions$concept_id, 
+                                    "Mapped (Occurs)", 
+                                    "Mapped (No Occurrences)")
+          ) %>%
+          dplyr::select(input_id = input_concept_id, mapped_standard_id = standard_concept_id, status)
+      } else {
+        # This sourceId was NOT in the "Maps to" results
+        status <- if (currentInputId %in% allOccurredConditions$concept_id) "Input is Standard (Occurs)" else "Not Mapped / Not Standard" 
+        data.frame(input_id = currentInputId, mapped_standard_id = NA_real_, status = status, stringsAsFactors = FALSE) 
+      }
+    })
+    mappingDetails <- dplyr::bind_rows(mappingDetailsList)
+    if (nrow(mappingDetails) > 0) {
+      mappingDetails <- mappingDetails %>% dplyr::arrange(input_id, mapped_standard_id)
     }
     
     # Show a modal dialog with the mapping details
     showModal(
       modalDialog(
-        title = "Input conditions mapped to standard concepts",
-        "Standard - input condition ID is already a standard concept ID;
-        Not mapped - ID is non-standard and couldn't be mapped with concept_relationship;
-        Mapped, no occurrences - ID mapped to standard, no occurrences in the dataset",
-        DT::dataTableOutput("mappingTableDetails"),
+        title = "Exposure Conditions: Mapping Details",
+        HTML(paste0(
+          "<b>Mapping Status Definitions:</b><br>",
+          "<ul><li><b>Mapped (Occurs):</b> Input ID mapped via 'Maps To' to a standard ID that has occurrences.</li>",
+          "<li><b>Mapped (No Occurrences):</b> Input ID mapped via 'Maps To' to a standard ID, but that standard ID has no occurrences.</li>",
+          "<li><b>Input is Standard (Occurs):</b> Input ID itself is a standard ID and has occurrences (no 'Maps To' needed/found).</li>",
+          "<li><b>Not Mapped / Not Standard:</b> Input ID could not be mapped via 'Maps To' and is not itself a known standard, occurring concept.</li>",
+          "<li><em>Note: One input ID can map to multiple standard IDs or multiple input IDs to one standard ID.</em></li></ul>"
+        )),
+        DT::dataTableOutput("exposureMappingTableModal"), 
         easyClose = TRUE,
-        size = "l",
+        size = "l", 
         footer = modalButton("Close")
       )
     )
-    
-    # Render the mapping details table in the modal
-    output$mappingTableDetails <- DT::renderDataTable({
-      DT::datatable(mappingDetails, options = list(pageLength = 10))
+    # Render table
+    output$exposureMappingTableModal <- DT::renderDataTable({
+      DT::datatable(mappingDetails, 
+                    width = "100%",
+                    options = list(pageLength = 10), 
+                    rownames = FALSE,
+                    colnames = c("Input Concept ID", "Mapped Standard Concept ID", "Status")) 
     })
     
-    # Finally, update the selectizeInput with only occurring standard concept IDs
+    selectedIdsAsChar <- as.character(occurredStandardIds) 
+    
+    currentChoiceValues <- as.character(allOccurredConditions$concept_id)
+    currentChoiceNames <- allOccurredConditions$concept_name_id
+    validChoiceIndices <- !is.na(currentChoiceValues) & !is.na(currentChoiceNames)
+    finalChoicesForSelectize <- setNames(currentChoiceValues[validChoiceIndices], currentChoiceNames[validChoiceIndices])
+    
+    validSelectedForUpdate <- selectedIdsAsChar[selectedIdsAsChar %in% finalChoicesForSelectize]
+    
+    if (length(sourceIds) > 0 && length(validSelectedForUpdate) == 0 && !is.null(input$exposureConditionFile$datapath)) {
+      showNotification("EXPOSURE FILE: No conditions from the file resulted in a selectable, occurring standard concept.", type = "warning", duration = 8)
+    }
+    
     updateSelectizeInput(
       session,
       "exposureConditionIds",
-      choices = setNames(
-        allOccurredConditions$concept_id,
-        allOccurredConditions$concept_name_id
-      ),
-      selected = occurredStandardIds,
-      server = TRUE
+      choices = finalChoicesForSelectize, 
+      selected = validSelectedForUpdate,  
+      server = TRUE 
     )
     
   })
   
   
-  # When a target condition file is uploaded, update the selected values:
+  
+  # When an outcome condition file is uploaded, update the selected values:
   observeEvent(input$outcomeConditionFile, {
-    req(input$outcomeConditionFile)
+    req(input$outcomeConditionFile, allOccurredConditions, cdm)
     
     # Extract condition concept IDs from file
     sourceIds <- extractConditionIds(input$outcomeConditionFile)
     
     if (is.null(sourceIds) || length(sourceIds) == 0) {
-      showNotification("No valid concept IDs found or could be extracted.", type = "warning")
+      showNotification("No valid concept IDs found or could be extracted from outcome file.", type = "warning")
       return()
     }
     
     # Map source concept ids to standard concept ids
     mapping <- mapInputToStandardIds(cdm, sourceIds)
     
-    # Identify unmapped source concept IDs
-    unmappedSourceIds <- setdiff(sourceIds, mapping$input_concept_id)
-    
-    # Check if there are any mappings
-    if (nrow(mapping) == 0) {
-      # If no mappings, then check which input IDs are already standard and exist in the dataset
-      occurredStandardIds <- sourceIds[sourceIds %in% allOccurredConditions$concept_id]
-    } else {
-      # Identify mapped standard IDs that occur in the dataset
-      occurredStandardIds <- mapping$standard_concept_id[mapping$standard_concept_id %in% allOccurredConditions$concept_id]
+    mappedAndOccurringIds <- numeric(0)
+    if (nrow(mapping) > 0) {
+      uniqueMappedStandards <- unique(stats::na.omit(mapping$standard_concept_id)) 
+      mappedAndOccurringIds <- uniqueMappedStandards[uniqueMappedStandards %in% allOccurredConditions$concept_id]
     }
     
-    # Create a detailed mapping table
-    mappingDetails <- mapping %>%
-      dplyr::mutate(status = as.character(
-        ifelse(
-          standard_concept_id %in% allOccurredConditions$concept_id,
-          "Mapped",
-          "Mapped, no occurrences"
-        )
-      ))
+    # Input IDs that are *already* standard and occur in the data
+    sourceIdsAlreadyStandardAndOccurring <- sourceIds[sourceIds %in% allOccurredConditions$concept_id]
     
-    # If there are unmapped source IDs, add them as separate rows
-    if (length(unmappedSourceIds) > 0) {
-      unmappedDf <- data.frame(
-        input_concept_id = unmappedSourceIds,
-        standard_concept_id = NA,
-        status = "Not mapped",
-        stringsAsFactors = FALSE
-      )
+    # Combine and get the final unique set of numeric IDs to be selected
+    occurredStandardIds <- unique(c(mappedAndOccurringIds, sourceIdsAlreadyStandardAndOccurring))
+    occurredStandardIds <- stats::na.omit(as.numeric(occurredStandardIds))
+    
+    # Create a detailed mapping table
+    mappingDetailsList <- lapply(sourceIds, function(currentInputId) { 
+      # Filter mapping for the currentInputId
+      mapsForCurrentId <- mapping %>% dplyr::filter(input_concept_id == currentInputId)
       
-      # Update the status to "Standard" if the unmapped ID is in allOccurredConditions
-      unmappedDf$status[unmappedDf$input_concept_id %in% allOccurredConditions$concept_id] <- "Standard"
-      
-      mappingDetails <- dplyr::bind_rows(mappingDetails, unmappedDf)
+      if (nrow(mapsForCurrentId) > 0) {
+        mapsForCurrentId %>%
+          dplyr::mutate(
+            status = dplyr::if_else(standard_concept_id %in% allOccurredConditions$concept_id, 
+                                    "Mapped (Occurs)", 
+                                    "Mapped (No Occurrences)")
+          ) %>%
+          dplyr::select(input_id = input_concept_id, mapped_standard_id = standard_concept_id, status)
+      } else {
+        # This sourceId was NOT in the "Maps to" results
+        status <- if (currentInputId %in% allOccurredConditions$concept_id) "Input is Standard (Occurs)" else "Not Mapped / Not Standard" 
+        data.frame(input_id = currentInputId, mapped_standard_id = NA_real_, status = status, stringsAsFactors = FALSE) 
+      }
+    })
+    mappingDetails <- dplyr::bind_rows(mappingDetailsList)
+    if (nrow(mappingDetails) > 0) {
+      mappingDetails <- mappingDetails %>% dplyr::arrange(input_id, mapped_standard_id)
     }
     
     # Show a modal dialog with the mapping details
     showModal(
       modalDialog(
-        title = "Input conditions mapped to standard concepts",
-        "Standard - input condition ID is already a standard concept ID;
-        Not mapped - ID is non-standard and couldn't be mapped with concept_relationship;
-        Mapped, no occurrences - ID mapped to standard, no occurrences in the dataset",
-        DT::dataTableOutput("mappingTableDetails"),
+        title = "Outcome Conditions: Mapping Details",
+        HTML(paste0(
+          "<b>Mapping Status Definitions:</b><br>",
+          "<ul><li><b>Mapped (Occurs):</b> Input ID mapped via 'Maps To' to a standard ID that has occurrences.</li>",
+          "<li><b>Mapped (No Occurrences):</b> Input ID mapped via 'Maps To' to a standard ID, but that standard ID has no occurrences.</li>",
+          "<li><b>Input is Standard (Occurs):</b> Input ID itself is a standard ID and has occurrences (no 'Maps To' needed/found).</li>",
+          "<li><b>Not Mapped / Not Standard:</b> Input ID could not be mapped via 'Maps To' and is not itself a known standard, occurring concept.</li>",
+          "<li><em>Note: One input ID can map to multiple standard IDs or multiple input IDs to one standard ID.</em></li></ul>"
+        )),
+        DT::dataTableOutput("outcomeMappingTableModal"),
         easyClose = TRUE,
-        size = "l",
+        size = "l", 
         footer = modalButton("Close")
       )
     )
-    
-    # Render the mapping details table in the modal
-    output$mappingTableDetails <- DT::renderDataTable({
-      DT::datatable(mappingDetails, options = list(pageLength = 10))
+    # Render table
+    output$outcomeMappingTableModal <- DT::renderDataTable({
+      DT::datatable(mappingDetails, 
+                    width = "100%",
+                    options = list(pageLength = 10), 
+                    rownames = FALSE,
+                    colnames = c("Input Concept ID", "Mapped Standard Concept ID", "Status")) 
     })
     
-    # Finally, update the selectizeInput with only occurring standard concept IDs
+    selectedIdsAsChar <- as.character(occurredStandardIds) 
+    
+    currentChoiceValues <- as.character(allOccurredConditions$concept_id)
+    currentChoiceNames <- allOccurredConditions$concept_name_id
+    validChoiceIndices <- !is.na(currentChoiceValues) & !is.na(currentChoiceNames)
+    finalChoicesForSelectize <- setNames(currentChoiceValues[validChoiceIndices], currentChoiceNames[validChoiceIndices])
+    
+    validSelectedForUpdate <- selectedIdsAsChar[selectedIdsAsChar %in% finalChoicesForSelectize]
+    
+    if (length(sourceIds) > 0 && length(validSelectedForUpdate) == 0 && !is.null(input$outcomeConditionFile$datapath)) {
+      showNotification("OUTCOME FILE: No conditions from the file resulted in a selectable, occurring standard concept.", type = "warning", duration = 8)
+    }
+    
     updateSelectizeInput(
       session,
       "outcomeConditionIds",
-      choices = setNames(
-        allOccurredConditions$concept_id,
-        allOccurredConditions$concept_name_id
-      ),
-      selected = occurredStandardIds,
-      server = TRUE
+      choices = finalChoicesForSelectize, 
+      selected = validSelectedForUpdate,  
+      server = TRUE 
     )
-  
+    
   })
   
   
