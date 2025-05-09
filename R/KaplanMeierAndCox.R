@@ -76,7 +76,7 @@ generateKmPlotObjects <- function(matchedSurvivalData, maxPlotTime = 1825, sessi
     
     # Find minimum survival for the graph y-axis limit
     # Get summary at the max time
-    endSummary <- summary(kmFit, times = maxPlotTime)
+    endSummary <- summary(kmFit, times = maxPlotTime, extend = TRUE)
     
     # Find smallest survival probability among groups at the end time
     minEndProb <- min(endSummary$surv, na.rm = TRUE)
