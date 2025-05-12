@@ -403,17 +403,39 @@ app_server <- function(input, output, session) {
     # --- Adjust p-values ---
     
     if (!is.null(finalSummaryDf)) {
-      kmPvalues <- finalSummaryDf$kmPvalue
-      hrPvalues <- finalSummaryDf$hrPvalue
       
-      # Number of p-values
-      numTests <- nrow(finalSummaryDf)
+      # 1. Identify the original p-values and which ones are valid (not NA)
+      originalKmPvalues <- finalSummaryDf$kmPvalue
+      isValidKm <- !is.na(originalKmPvalues)
       
-      #finalSummaryDf$pAdjBon <- p.adjust(pValues, method = "bonferroni", n = numTests)
+      # 2. Extract only the valid p-values to be adjusted
+      kmPvaluesToAdjust <- originalKmPvalues[isValidKm]
       
-      # Adjust p-values with the Holm method
-      finalSummaryDf$kmPvalueAdjHolm <- p.adjust(kmPvalues, method = "holm", n = numTests)
-      finalSummaryDf$hrPvalueAdjHolm <- p.adjust(hrPvalues, method = "holm", n = numTests)
+      # 3. Initialize the new adjusted p-value column
+      finalSummaryDf$kmPvalueAdjHolm <- NA_real_
+      
+      # 4. Adjust p-values if there are any valid p-values
+      if (length(kmPvaluesToAdjust) > 0) {
+        adjustedKmValues <- p.adjust(kmPvaluesToAdjust, method = "holm")
+        
+        # 5. Place the adjusted p-values back into the correct rows
+        finalSummaryDf$kmPvalueAdjHolm[isValidKm] <- adjustedKmValues
+      }
+
+      # Do the same for hazard ratio p-values
+      
+      originalhrPvalues <- finalSummaryDf$hrPvalue
+      isValidHr <- !is.na(originalhrPvalues)
+      
+      hrPvaluesToAdjust <- originalhrPvalues[isValidHr]
+
+      finalSummaryDf$hrPvalueAdjHolm <- NA_real_
+      
+      if (length(hrPvaluesToAdjust) > 0) {
+        adjustedHrValues <- p.adjust(hrPvaluesToAdjust, method = "holm")
+        
+        finalSummaryDf$hrPvalueAdjHolm[isValidHr] <- adjustedHrValues
+      }
     }
     
     
