@@ -1,6 +1,19 @@
-# Exposure2OutcomeSurv: siia eesti keeles kirjeldus
+# Exposure2OutcomeSurv: Eestikeelne kokkuvõte 
+English below
 
-eesti
+`Exposure2OutcomeSurv` on R tarkvarapakett diagnooside (ekspositsioonide ja tulemite) vaheliste seoste uurimiseks elukestusanalüüsiga ehk statistiliste meetoditega, mis analüüsivad aega mingi uuritava sündmuse toimumiseni.
+Paketil on Shiny graafiline kasutajaliides ning see töötab OMOP CDM vormingus terviseandmetega.
+
+Rakendus võimaldab:
+
+* Ühenduda OMOP CDM andmebaasiga, mis võib asuda erinevatel platvormidel või kohalikes DuckDB failides.
+* Valida ekspositsiooni ja tulemusseisundi kontseptsioone.
+* Luua soo ja vanuse põhjal sobitades ekspositsioonita võrdlusgrupp.
+* Visualiseerida elukestuserinevusi Kaplan-Meieri graafikute abil.
+* Hinnata riskide suhteid (Hazard Ratios) Coxi võrdeliste riskide mudelite abil.
+* Salvestada ja laadida analüüsi tulemusi.
+
+Pakett loodi Tartu Ülikooli bakalaureusetöö raames 2025. aastal.
 
 # Exposure2OutcomeSurv: Survival Analysis on Exposure and Outcome Condition Pairs
 
@@ -117,4 +130,5 @@ The application allows users to:
     * Optionally, load previously saved results.
 
 ## Author Information
+The package was developed as part of a Bachelor's thesis at the University of Tartu in 2025.
 * **Author and Maintainer:** Sander Soodla (<sandersoodla@gmail.com>)
